@@ -1,0 +1,6 @@
+{
+  "dashboard.adminSummary.title": "Rezumat azi",
+  "dashboard.adminSummary.confirmedLabel": "Programări confirmate astăzi (toți specialiștii)",
+  "dashboard.adminSummary.revenueLabel": "Valoare totală",
+  "dashboard.adminSummary.totalValue": "Total {{amount}} RON"
+}

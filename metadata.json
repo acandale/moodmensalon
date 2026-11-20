@@ -1,0 +1,8 @@
+{
+  "name": "BarberPro - Professional Booking",
+  "description": "Book your barber appointments with ease. Professional haircuts and beard trims.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

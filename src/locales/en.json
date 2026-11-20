@@ -1,0 +1,6 @@
+{
+  "dashboard.adminSummary.title": "Today's summary",
+  "dashboard.adminSummary.confirmedLabel": "Confirmed appointments today (all specialists)",
+  "dashboard.adminSummary.revenueLabel": "Total value",
+  "dashboard.adminSummary.totalValue": "Total {{amount}} RON"
+}
