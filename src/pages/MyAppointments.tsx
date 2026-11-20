@@ -1,19 +1,26 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ro as roLocale, enUS } from "date-fns/locale";
+import { Star, Pencil } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/hooks/useLanguage";
 import { useSalonSettings } from "@/hooks/useSalonSettings";
 import { supabase } from "@/integrations/supabase/client";
+import { SalonReview, useMyReviews } from "@/hooks/useReviews";
+import { ReviewDialog, ReviewTargetAppointment } from "@/components/reviews/ReviewDialog";
+import { cn } from "@/lib/utils";
 
 interface Appt {
   id: string;
   start_time: string;
   end_time: string;
   status: string | null;
+  service_id: string | null;
+  specialist_id: string | null;
   services: { name: string; price: number; duration_minutes: number } | null;
   specialists: { name: string } | null;
 }
@@ -27,6 +34,7 @@ export default function MyAppointments() {
   const PAGE = 20;
   const [upPage, setUpPage] = useState(1);
   const [pastPage, setPastPage] = useState(1);
+  const [reviewTarget, setReviewTarget] = useState<ReviewTargetAppointment | null>(null);
 
   const { data: appts = [], isLoading: loading } = useQuery({
     queryKey: ["my-appointments", user?.id],
@@ -34,13 +42,22 @@ export default function MyAppointments() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("appointments")
-        .select("id,start_time,end_time,status,services(name,price,duration_minutes),specialists(name)")
+        .select("id,start_time,end_time,status,service_id,specialist_id,services(name,price,duration_minutes),specialists(name)")
         .eq("user_id", user!.id)
         .order("start_time", { ascending: false });
       if (error) throw error;
       return (data || []) as unknown as Appt[];
     },
   });
+
+  const { data: myReviewsData } = useMyReviews();
+  const reviewsByAppointment = useMemo(() => {
+    const map = new Map<string, SalonReview>();
+    for (const r of myReviewsData?.reviews || []) {
+      map.set(r.appointment_id, r);
+    }
+    return map;
+  }, [myReviewsData?.reviews]);
 
   if (!isLoading && !user) return <Navigate to="/auth" replace />;
 
@@ -75,27 +92,93 @@ export default function MyAppointments() {
     );
   };
 
+  const openReviewModal = (a: Appt, existingReview?: SalonReview) => {
+    const start = new Date(a.start_time);
+    setReviewTarget({
+      id: a.id,
+      serviceId: a.service_id,
+      specialistId: a.specialist_id,
+      serviceName: a.services?.name || (ro ? "Serviciu" : "Service"),
+      specialistName: a.specialists?.name,
+      dateLabel: `${dateLabel(start)} • ${format(start, "HH:mm")}`,
+      existingReview: existingReview || null,
+    });
+  };
+
   const Card = ({ a }: { a: Appt }) => {
     const start = new Date(a.start_time);
     const end = new Date(a.end_time);
     const mins = Math.round((end.getTime() - start.getTime()) / 60000);
+    const existingReview = reviewsByAppointment.get(a.id);
+    const canReview = a.status !== "cancelled";
+
     return (
-      <div className="rounded-lg bg-card border border-border shadow-sm p-4">
-        <span className={`inline-block text-xs font-semibold px-2 py-1 rounded ${a.status === "cancelled" ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground"}`}>
-          {statusLabel(a)}
-        </span>
-        <h3 className="text-lg font-bold mt-1 text-foreground">{dateLabel(start)}</h3>
-        <div className="border-t border-border my-3" />
-        <div className="flex justify-between gap-2">
-          <span className="font-semibold text-foreground">{a.services?.name}</span>
-          <span className="font-bold text-foreground whitespace-nowrap">{a.services?.price} lei</span>
+      <div className="rounded-lg bg-card border border-border shadow-sm p-4 flex flex-col justify-between">
+        <div>
+          <span className={`inline-block text-xs font-semibold px-2 py-1 rounded ${a.status === "cancelled" ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground"}`}>
+            {statusLabel(a)}
+          </span>
+          <h3 className="text-lg font-bold mt-1 text-foreground">{dateLabel(start)}</h3>
+          <div className="border-t border-border my-3" />
+          <div className="flex justify-between gap-2">
+            <span className="font-semibold text-foreground">{a.services?.name}</span>
+            <span className="font-bold text-foreground whitespace-nowrap">{a.services?.price} lei</span>
+          </div>
+          <p className="text-sm text-foreground/80">
+            {a.specialists?.name} - {salon?.salon_name || "BarberPro"}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {format(start, "HH:mm")} - {format(end, "HH:mm")} ({mins} min)
+          </p>
         </div>
-        <p className="text-sm text-foreground/80">
-          {a.specialists?.name} - {salon?.salon_name || "BarberPro"}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          {format(start, "HH:mm")} - {format(end, "HH:mm")} ({mins} min)
-        </p>
+
+        {canReview && (
+          <div className="mt-4 pt-3 border-t border-border">
+            {existingReview ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-0.5">
+                    {Array.from({ length: 5 }).map((_, idx) => (
+                      <Star
+                        key={idx}
+                        className={cn(
+                          "h-3.5 w-3.5",
+                          idx < existingReview.rating
+                            ? "text-amber-400 fill-amber-400"
+                            : "text-muted-foreground/30"
+                        )}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openReviewModal(a, existingReview)}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-purple hover:underline"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    {ro ? "Editează recenzia" : "Edit review"}
+                  </button>
+                </div>
+                {existingReview.comment && (
+                  <p className="text-xs text-muted-foreground line-clamp-2">
+                    „{existingReview.comment}”
+                  </p>
+                )}
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => openReviewModal(a)}
+              >
+                <Star className="h-4 w-4 mr-1.5 text-amber-400" />
+                {ro ? "Lasă o recenzie" : "Leave a review"}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -136,6 +219,14 @@ export default function MyAppointments() {
           </>
         )}
       </main>
+
+      <ReviewDialog
+        open={!!reviewTarget}
+        onOpenChange={(open) => {
+          if (!open) setReviewTarget(null);
+        }}
+        appointment={reviewTarget}
+      />
     </div>
   );
 }

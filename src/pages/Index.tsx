@@ -2,6 +2,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { HeroSection } from "@/components/landing/HeroSection";
 import { ServicesSection } from "@/components/landing/ServicesSection";
 import { AboutSection } from "@/components/landing/AboutSection";
+import { ReviewsSection } from "@/components/landing/ReviewsSection";
 import { Footer } from "@/components/landing/Footer";
 import { useAuth } from "@/hooks/useAuth";
 import { useEffect } from "react";
@@ -23,6 +24,7 @@ const Index = () => {
       <HeroSection />
       <ServicesSection />
       <AboutSection />
+      <ReviewsSection />
       <Footer />
     </div>
   );

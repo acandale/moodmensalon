@@ -38,6 +38,7 @@ import {
   Calendar,
   X,
   Settings,
+  MessageSquare,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ import { WorkHoursManager } from "@/components/admin/WorkHoursManager";
 import { AdminBookAppointment } from "@/components/admin/AdminBookAppointment";
 import { SalonSettingsManager } from "@/components/admin/SalonSettingsManager";
 import { SpecialistsManager } from "@/components/admin/SpecialistsManager";
+import { ReviewsManager } from "@/components/admin/ReviewsManager";
 
 interface ProfileInfo {
   full_name: string;
@@ -75,7 +77,7 @@ const SERVICE_COLORS: Record<string, string> = {
 };
 
 type ViewMode = "month" | "week" | "day";
-type AdminTab = "appointments" | "settings" | "specialists" | "work-hours";
+type AdminTab = "appointments" | "settings" | "specialists" | "work-hours" | "reviews";
 
 export default function AdminPage() {
   const { user, isAdmin, isSpecialist, specialistId, isLoading: authLoading } = useAuth();
@@ -87,7 +89,7 @@ export default function AdminPage() {
 
   const tabParam = searchParams.get("tab");
   const initialTab: AdminTab =
-    tabParam === "settings" || tabParam === "specialists" || tabParam === "work-hours"
+    tabParam === "settings" || tabParam === "specialists" || tabParam === "work-hours" || tabParam === "reviews"
       ? tabParam
       : "appointments";
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
@@ -519,6 +521,10 @@ export default function AdminPage() {
                   <Calendar className="h-4 w-4" />
                   Program Salon
                 </TabsTrigger>
+                <TabsTrigger value="reviews" className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  {language === "ro" ? "Recenzii" : "Reviews"}
+                </TabsTrigger>
                 <TabsTrigger value="settings" className="flex items-center gap-2">
                   <Settings className="h-4 w-4" />
                   {t("admin.settings")}
@@ -530,6 +536,10 @@ export default function AdminPage() {
                 <TabsTrigger value="specialists" className="flex items-center gap-2">
                   <Scissors className="h-4 w-4" />
                   {t("admin.myConfig")}
+                </TabsTrigger>
+                <TabsTrigger value="reviews" className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  {language === "ro" ? "Recenzii" : "Reviews"}
                 </TabsTrigger>
                 <Button
                   variant="default"
@@ -672,8 +682,10 @@ export default function AdminPage() {
             <WorkHoursManager />
           </TabsContent>
 
-
-
+          {/* Reviews Tab */}
+          <TabsContent value="reviews">
+            <ReviewsManager restrictToSpecialistId={isSpecialist && !isAdmin ? specialistId : undefined} />
+          </TabsContent>
 
           {/* Settings Tab */}
           <TabsContent value="settings">

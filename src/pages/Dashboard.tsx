@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/hooks/useLanguage";
@@ -6,7 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Navbar } from "@/components/layout/Navbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Calendar, Clock, Scissors, Plus, Loader2 } from "lucide-react";
+import { BarChart3, Calendar, Clock, Scissors, Plus, Loader2, Star, Pencil } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { format, isFuture, isToday, parseISO } from "date-fns";
@@ -15,6 +15,9 @@ import { useToast } from "@/hooks/use-toast";
 import { AdminBookAppointment } from "@/components/admin/AdminBookAppointment";
 import { SalonGalleryCarousel } from "@/components/SalonGalleryCarousel";
 import { PushNotificationBanner } from "@/components/notifications/PushNotificationBanner";
+import { SalonReview, useMyReviews } from "@/hooks/useReviews";
+import { ReviewDialog, ReviewTargetAppointment } from "@/components/reviews/ReviewDialog";
+import { cn } from "@/lib/utils";
 
 interface Appointment {
   id: string;
@@ -22,6 +25,8 @@ interface Appointment {
   end_time: string;
   status: string;
   user_id?: string;
+  service_id?: string | null;
+  specialist_id?: string | null;
   guest_name?: string | null;
   guest_phone?: string | null;
   services: {
@@ -29,6 +34,9 @@ interface Appointment {
     duration_minutes: number;
     price: number;
   };
+  specialists?: {
+    name: string;
+  } | null;
   profiles?: {
     full_name: string;
   };
@@ -44,6 +52,7 @@ export default function Dashboard() {
   const dateLocale = ro ? roLocale : enUS;
   const queryClient = useQueryClient();
   const [bookDialogOpen, setBookDialogOpen] = useState(false);
+  const [reviewTarget, setReviewTarget] = useState<ReviewTargetAppointment | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -64,12 +73,17 @@ export default function Dashboard() {
           end_time,
           status,
           user_id,
+          service_id,
+          specialist_id,
           guest_name,
           guest_phone,
           services (
             name,
             duration_minutes,
             price
+          ),
+          specialists (
+            name
           )
         `)
         .order("start_time", { ascending: true });
@@ -95,18 +109,58 @@ export default function Dashboard() {
         return data.map(a => ({
           ...a,
           profiles: { full_name: (a.user_id ? profileMap.get(a.user_id) : null) || a.guest_name || "Unknown" },
-        })) as Appointment[];
+        })) as unknown as Appointment[];
       }
 
-      return data as Appointment[];
+      return data as unknown as Appointment[];
     },
     enabled: !!user,
   });
 
+  const { data: myReviewsData } = useMyReviews();
+  const reviewsByAppointment = useMemo(() => {
+    const map = new Map<string, SalonReview>();
+    for (const r of myReviewsData?.reviews || []) {
+      map.set(r.appointment_id, r);
+    }
+    return map;
+  }, [myReviewsData?.reviews]);
 
   const upcomingAppointments = appointments.filter(
     (apt) => isFuture(parseISO(apt.start_time)) && apt.status === "confirmed"
   );
+
+  const reviewableAppointments = useMemo(() => {
+    if (isAdmin || isSpecialist) return [];
+    const nowTs = Date.now();
+    return [...appointments]
+      .filter((apt) => apt.status !== "cancelled")
+      .sort((a, b) => {
+        const aPast = new Date(a.end_time).getTime() <= nowTs;
+        const bPast = new Date(b.end_time).getTime() <= nowTs;
+        if (aPast !== bPast) return aPast ? -1 : 1;
+        return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
+      })
+      .slice(0, 6);
+  }, [appointments, isAdmin, isSpecialist]);
+
+  const openReviewModal = (apt: Appointment, existingReview?: SalonReview) => {
+    const start = parseISO(apt.start_time);
+    const formattedDate = format(
+      start,
+      ro ? "d MMM yyyy • HH:mm" : "MMM d, yyyy • h:mm a",
+      { locale: dateLocale }
+    );
+    setReviewTarget({
+      id: apt.id,
+      serviceId: apt.service_id,
+      specialistId: apt.specialist_id,
+      serviceName: apt.services?.name || (ro ? "Serviciu" : "Service"),
+      specialistName: apt.specialists?.name,
+      dateLabel: formattedDate,
+      existingReview: existingReview || null,
+    });
+  };
 
   const todayAppointments = isAdmin
     ? appointments.filter(
@@ -314,6 +368,16 @@ export default function Dashboard() {
                 <Plus className="h-4 w-4" />
                 {t("dashboard.bookNew")}
               </Button>
+              {!isAdmin && !isSpecialist && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => navigate("/my-appointments")}
+                >
+                  <Star className="h-4 w-4 text-amber-400" />
+                  {ro ? "Programările și recenziile mele" : "My appointments & reviews"}
+                </Button>
+              )}
               {isSpecialist && (
                 <Button
                   variant="outline"
@@ -412,6 +476,118 @@ export default function Dashboard() {
             </div>
           )
         )}
+
+        {/* Client Reviews Section */}
+        {!isAdmin && !isSpecialist && reviewableAppointments.length > 0 && (
+          <div className="mt-8">
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-xl font-semibold flex items-center gap-2">
+                  <Star className="h-5 w-5 text-amber-400 fill-amber-400" />
+                  {ro ? "Evaluează programările tale" : "Rate your appointments"}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {ro
+                    ? "Lasă o recenzie pentru programările tale și ajută alți clienți să descopere salonul."
+                    : "Leave a review for your visits and help other clients discover the salon."}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate("/my-appointments")}
+              >
+                {ro ? "Vezi toate" : "View all"}
+              </Button>
+            </div>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {reviewableAppointments.map((apt) => {
+                const existingReview = reviewsByAppointment.get(apt.id);
+                const isPast = new Date(apt.end_time).getTime() <= Date.now();
+
+                return (
+                  <Card key={`rev-${apt.id}`} variant="default" className="flex flex-col justify-between">
+                    <CardContent className="pt-6 flex-1 flex flex-col justify-between gap-4">
+                      <div>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div>
+                            <p className="font-semibold">{apt.services?.name}</p>
+                            {apt.specialists?.name && (
+                              <p className="text-xs text-muted-foreground">
+                                {apt.specialists.name}
+                              </p>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                            {isPast
+                              ? ro
+                                ? "Finalizat"
+                                : "Completed"
+                              : ro
+                              ? "Confirmat"
+                              : "Confirmed"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {format(
+                            parseISO(apt.start_time),
+                            ro ? "d MMM yyyy, HH:mm" : "MMM d, yyyy, h:mm a",
+                            { locale: dateLocale }
+                          )}
+                        </p>
+                      </div>
+
+                      {existingReview ? (
+                        <div className="pt-3 border-t border-border space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-0.5">
+                              {Array.from({ length: 5 }).map((_, idx) => (
+                                <Star
+                                  key={idx}
+                                  className={cn(
+                                    "h-3.5 w-3.5",
+                                    idx < existingReview.rating
+                                      ? "text-amber-400 fill-amber-400"
+                                      : "text-muted-foreground/30"
+                                  )}
+                                />
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openReviewModal(apt, existingReview)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-purple hover:underline"
+                            >
+                              <Pencil className="h-3 w-3" />
+                              {ro ? "Editează recenzia" : "Edit review"}
+                            </button>
+                          </div>
+                          {existingReview.comment && (
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              „{existingReview.comment}”
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => openReviewModal(apt)}
+                        >
+                          <Star className="h-4 w-4 mr-1.5 text-amber-400" />
+                          {ro ? "Lasă o recenzie" : "Leave a review"}
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </main>
 
       {isSpecialist && (
@@ -423,6 +599,14 @@ export default function Dashboard() {
           }}
         />
       )}
+
+      <ReviewDialog
+        open={!!reviewTarget}
+        onOpenChange={(open) => {
+          if (!open) setReviewTarget(null);
+        }}
+        appointment={reviewTarget}
+      />
 
       <AlertDialog open={!!confirmCancelId} onOpenChange={(o) => !o && setConfirmCancelId(null)}>
         <AlertDialogContent>

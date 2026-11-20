@@ -287,6 +287,76 @@ export type Database = {
         }
         Relationships: []
       }
+      reviews: {
+        Row: {
+          appointment_id: string
+          author_name: string
+          comment: string
+          created_at: string
+          id: string
+          is_published: boolean
+          rating: number
+          replied_at: string | null
+          salon_reply: string | null
+          service_id: string | null
+          specialist_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          appointment_id: string
+          author_name: string
+          comment?: string
+          created_at?: string
+          id?: string
+          is_published?: boolean
+          rating: number
+          replied_at?: string | null
+          salon_reply?: string | null
+          service_id?: string | null
+          specialist_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          appointment_id?: string
+          author_name?: string
+          comment?: string
+          created_at?: string
+          id?: string
+          is_published?: boolean
+          rating?: number
+          replied_at?: string | null
+          salon_reply?: string | null
+          service_id?: string | null
+          specialist_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reviews_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: true
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reviews_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reviews_specialist_id_fkey"
+            columns: ["specialist_id"]
+            isOneToOne: false
+            referencedRelation: "specialists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       salon_settings: {
         Row: {
           about_cards: Json
