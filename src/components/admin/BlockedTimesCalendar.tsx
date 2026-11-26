@@ -1,10 +1,16 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -28,7 +34,9 @@ import {
   startOfWeek,
   endOfWeek,
 } from "date-fns";
+import { ro } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Loader2, Plus, Trash2, Clock } from "lucide-react";
+import { TIME_OPTIONS_24H, capitalizeFirst } from "@/lib/time-format";
 
 interface BlockedTime {
   id: string;
@@ -41,30 +49,34 @@ interface BlockedTimesCalendarProps {
   specialistId: string;
 }
 
+const WEEKDAY_HEADERS = ["Lu", "Ma", "Mi", "Jo", "Vi", "Sâ", "Du"];
+
 export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  const [selectedDay, setSelectedDay] = useState<Date | null>(new Date());
   const [blockTimeDialog, setBlockTimeDialog] = useState(false);
   const [blockTimeData, setBlockTimeData] = useState({
-    startTime: "",
-    endTime: "",
+    startTime: "09:00",
+    endTime: "10:00",
     reason: "",
   });
 
   const { data: blockedTimes = [], isLoading } = useQuery({
-    queryKey: ["specialist-blocked-times", specialistId, currentDate.toISOString()],
+    queryKey: ["specialist-blocked-times", specialistId, format(currentDate, "yyyy-MM")],
     queryFn: async () => {
-      const startDate = startOfMonth(currentDate);
-      const endDate = endOfMonth(currentDate);
+      const monthStart = startOfMonth(currentDate);
+      const monthEnd = endOfMonth(currentDate);
+      const rangeStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+      const rangeEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
 
       const { data, error } = await supabase
         .from("blocked_times")
         .select("*")
         .eq("specialist_id", specialistId)
-        .gte("start_time", startDate.toISOString())
-        .lte("start_time", endDate.toISOString())
+        .gte("start_time", rangeStart.toISOString())
+        .lte("start_time", rangeEnd.toISOString())
         .order("start_time", { ascending: true });
 
       if (error) throw error;
@@ -75,7 +87,10 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
   const blockTimeMutation = useMutation({
     mutationFn: async () => {
       if (!selectedDay) return;
-      
+      if (!blockTimeData.startTime || !blockTimeData.endTime || blockTimeData.endTime <= blockTimeData.startTime) {
+        throw new Error("INVALID_RANGE");
+      }
+
       const dateStr = format(selectedDay, "yyyy-MM-dd");
       const startTime = new Date(`${dateStr}T${blockTimeData.startTime}`);
       const endTime = new Date(`${dateStr}T${blockTimeData.endTime}`);
@@ -90,13 +105,19 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
       if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "Timp blocat cu succes" });
+      toast({ title: "Orar blocat cu succes" });
       setBlockTimeDialog(false);
-      setBlockTimeData({ startTime: "", endTime: "", reason: "" });
+      setBlockTimeData({ startTime: "09:00", endTime: "10:00", reason: "" });
       queryClient.invalidateQueries({ queryKey: ["specialist-blocked-times", specialistId] });
+      queryClient.invalidateQueries({ queryKey: ["blocked-times"] });
     },
-    onError: () => {
-      toast({ title: "Eroare la blocarea timpului", variant: "destructive" });
+    onError: (err) => {
+      const isRange = err instanceof Error && err.message === "INVALID_RANGE";
+      toast({
+        title: isRange ? "Interval orar invalid" : "Eroare la blocarea orarului",
+        description: isRange ? "Ora de sfârșit trebuie să fie după ora de început." : undefined,
+        variant: "destructive",
+      });
     },
   });
 
@@ -108,6 +129,7 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
     onSuccess: () => {
       toast({ title: "Blocaj eliminat" });
       queryClient.invalidateQueries({ queryKey: ["specialist-blocked-times", specialistId] });
+      queryClient.invalidateQueries({ queryKey: ["blocked-times"] });
     },
     onError: () => {
       toast({ title: "Eroare la eliminare", variant: "destructive" });
@@ -121,14 +143,14 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
   const renderCalendar = () => {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
-    const calendarStart = startOfWeek(monthStart);
-    const calendarEnd = endOfWeek(monthEnd);
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
     const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
     return (
       <div className="grid grid-cols-7 gap-1">
-        {["Du", "Lu", "Ma", "Mi", "Jo", "Vi", "Sâ"].map((day) => (
-          <div key={day} className="p-1 text-center text-xs font-medium text-muted-foreground">
+        {WEEKDAY_HEADERS.map((day) => (
+          <div key={day} className="p-1.5 text-center text-xs font-medium text-muted-foreground">
             {day}
           </div>
         ))}
@@ -142,10 +164,10 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
             <div
               key={day.toISOString()}
               className={cn(
-                "min-h-[60px] p-1 border rounded-lg transition-colors cursor-pointer hover:bg-muted/50 text-xs",
+                "min-h-[64px] p-1.5 border rounded-lg transition-colors cursor-pointer hover:bg-muted/50 text-xs",
                 isCurrentMonth ? "bg-card" : "bg-muted/30",
                 isToday && "ring-2 ring-purple",
-                isSelected && "bg-purple/10"
+                isSelected && "bg-purple/10 border-purple"
               )}
               onClick={() => setSelectedDay(day)}
             >
@@ -153,12 +175,12 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
                 {format(day, "d")}
               </div>
               {dayBlockedTimes.slice(0, 1).map((bt) => (
-                <div key={bt.id} className="p-0.5 rounded bg-red-100 text-red-700 truncate text-[10px]">
-                  {format(parseISO(bt.start_time), "HH:mm")}
+                <div key={bt.id} className="p-0.5 rounded bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300 truncate text-[10px]">
+                  {format(parseISO(bt.start_time), "HH:mm")}–{format(parseISO(bt.end_time), "HH:mm")}
                 </div>
               ))}
               {dayBlockedTimes.length > 1 && (
-                <div className="text-[10px] text-muted-foreground">+{dayBlockedTimes.length - 1}</div>
+                <div className="text-[10px] text-muted-foreground">+{dayBlockedTimes.length - 1} în plus</div>
               )}
             </div>
           );
@@ -168,6 +190,7 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
   };
 
   const selectedDayBlockedTimes = selectedDay ? getBlockedTimesForDay(selectedDay) : [];
+  const endTimeOptions = TIME_OPTIONS_24H.filter((t) => t > blockTimeData.startTime);
 
   if (isLoading) {
     return (
@@ -184,7 +207,9 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
         <Button variant="ghost" size="icon" onClick={() => setCurrentDate(subMonths(currentDate, 1))}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <span className="text-sm font-medium">{format(currentDate, "MMMM yyyy")}</span>
+        <span className="text-sm font-semibold">
+          {capitalizeFirst(format(currentDate, "MMMM yyyy", { locale: ro }))}
+        </span>
         <Button variant="ghost" size="icon" onClick={() => setCurrentDate(addMonths(currentDate, 1))}>
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -192,41 +217,96 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
 
       {renderCalendar()}
 
-      {/* Selected day details */}
+      {/* Selected day details — Blocaj orar */}
       {selectedDay ? (
         <div className="space-y-3 pt-3 border-t">
-          <div className="flex items-center justify-between">
-            <p className="font-medium text-sm">{format(selectedDay, "EEEE, d MMM")}</p>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Blocaj orar</p>
+              <p className="font-medium text-sm">
+                {capitalizeFirst(format(selectedDay, "EEEE, d MMMM yyyy", { locale: ro }))}
+              </p>
+            </div>
             <Dialog open={blockTimeDialog} onOpenChange={setBlockTimeDialog}>
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Plus className="h-3 w-3" /> Blochează
+                <Button variant="default" size="sm">
+                  <Plus className="h-3.5 w-3.5" /> Blochează orar
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Blochează timp</DialogTitle>
+                  <DialogTitle>Blocaj orar</DialogTitle>
                   <DialogDescription>
-                    Blochează un interval pentru {format(selectedDay, "d MMMM yyyy")}
+                    Blochează un interval orar pentru{" "}
+                    {capitalizeFirst(format(selectedDay, "EEEE, d MMMM yyyy", { locale: ro }))}
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 mt-4">
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
+                    <div className="space-y-1.5">
                       <Label>Ora început</Label>
-                      <Input type="time" value={blockTimeData.startTime} onChange={(e) => setBlockTimeData({ ...blockTimeData, startTime: e.target.value })} />
+                      <Select
+                        value={blockTimeData.startTime}
+                        onValueChange={(value) => {
+                          const nextEnd =
+                            blockTimeData.endTime <= value
+                              ? TIME_OPTIONS_24H.find((t) => t > value) || "23:00"
+                              : blockTimeData.endTime;
+                          setBlockTimeData({ ...blockTimeData, startTime: value, endTime: nextEnd });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Alege ora" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-60">
+                          {TIME_OPTIONS_24H.slice(0, -1).map((time) => (
+                            <SelectItem key={time} value={time}>
+                              {time}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <div>
+                    <div className="space-y-1.5">
                       <Label>Ora sfârșit</Label>
-                      <Input type="time" value={blockTimeData.endTime} onChange={(e) => setBlockTimeData({ ...blockTimeData, endTime: e.target.value })} />
+                      <Select
+                        value={blockTimeData.endTime}
+                        onValueChange={(value) =>
+                          setBlockTimeData({ ...blockTimeData, endTime: value })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Alege ora" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-60">
+                          {endTimeOptions.map((time) => (
+                            <SelectItem key={time} value={time}>
+                              {time}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-                  <div>
+                  <div className="space-y-1.5">
                     <Label>Motiv (opțional)</Label>
-                    <Input value={blockTimeData.reason} onChange={(e) => setBlockTimeData({ ...blockTimeData, reason: e.target.value })} placeholder="ex: Pauză de masă" />
+                    <Input
+                      value={blockTimeData.reason}
+                      onChange={(e) => setBlockTimeData({ ...blockTimeData, reason: e.target.value })}
+                      placeholder="ex: Pauză de masă"
+                    />
                   </div>
-                  <Button className="w-full" variant="hero" onClick={() => blockTimeMutation.mutate()} disabled={!blockTimeData.startTime || !blockTimeData.endTime || blockTimeMutation.isPending}>
-                    {blockTimeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Blochează"}
+                  <Button
+                    className="w-full"
+                    variant="hero"
+                    onClick={() => blockTimeMutation.mutate()}
+                    disabled={!blockTimeData.startTime || !blockTimeData.endTime || blockTimeMutation.isPending}
+                  >
+                    {blockTimeMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Salvează blocaj orar"
+                    )}
                   </Button>
                 </div>
               </DialogContent>
@@ -236,26 +316,38 @@ export function BlockedTimesCalendar({ specialistId }: BlockedTimesCalendarProps
           {selectedDayBlockedTimes.length > 0 ? (
             <div className="space-y-2">
               {selectedDayBlockedTimes.map((bt) => (
-                <div key={bt.id} className="flex items-center justify-between p-2 rounded-lg border bg-red-50 text-sm">
+                <div
+                  key={bt.id}
+                  className="flex items-center justify-between p-2.5 rounded-lg border bg-red-50 dark:bg-red-950/30 text-sm"
+                >
                   <div className="flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5 text-red-600" />
-                    <span className="font-medium">
-                      {format(parseISO(bt.start_time), "HH:mm")} - {format(parseISO(bt.end_time), "HH:mm")}
+                    <Clock className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
+                    <span className="font-medium tabular-nums">
+                      {format(parseISO(bt.start_time), "HH:mm")} – {format(parseISO(bt.end_time), "HH:mm")}
                     </span>
                     {bt.reason && <span className="text-xs text-muted-foreground">• {bt.reason}</span>}
                   </div>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => deleteMutation.mutate(bt.id)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-red-600 dark:text-red-400"
+                    onClick={() => deleteMutation.mutate(bt.id)}
+                  >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground text-center py-2">Nicio blocare pentru această zi</p>
+            <p className="text-xs text-muted-foreground text-center py-2">
+              Nicio blocare orară pentru această zi
+            </p>
           )}
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground text-center py-2">Selectează o zi din calendar</p>
+        <p className="text-xs text-muted-foreground text-center py-2">
+          Selectează o zi din calendar
+        </p>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { enUS, ro as roLocale } from "date-fns/locale";
+import { ro as roLocale } from "date-fns/locale";
 import {
   Bell,
   BellOff,
@@ -36,7 +36,6 @@ export function NotificationBell() {
   const { user, isAdmin } = useAuth();
   const { language } = useLanguage();
   const isRo = language === "ro";
-  const dateLocale = isRo ? roLocale : enUS;
   const { toast } = useToast();
 
   const {
@@ -120,8 +119,8 @@ export function NotificationBell() {
     const scheduledDate = parseISO(item.scheduled_for);
     const formattedTime = format(
       scheduledDate,
-      isRo ? "d MMM, HH:mm" : "MMM d, h:mm a",
-      { locale: dateLocale }
+      "d MMM, HH:mm",
+      { locale: roLocale }
     );
 
     return (

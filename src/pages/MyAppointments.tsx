@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { ro as roLocale, enUS } from "date-fns/locale";
+import { ro as roLocale } from "date-fns/locale";
 import { Star, Pencil } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { useSalonSettings } from "@/hooks/useSalonSettings";
 import { supabase } from "@/integrations/supabase/client";
 import { SalonReview, useMyReviews } from "@/hooks/useReviews";
 import { ReviewDialog, ReviewTargetAppointment } from "@/components/reviews/ReviewDialog";
-import { cn } from "@/lib/utils";
+import { StarRating } from "@/components/reviews/StarRating";
 
 interface Appt {
   id: string;
@@ -30,7 +30,7 @@ export default function MyAppointments() {
   const { language } = useLanguage();
   const { data: salon } = useSalonSettings();
   const ro = language === "ro";
-  const locale = ro ? roLocale : enUS;
+  const locale = roLocale;
   const PAGE = 20;
   const [upPage, setUpPage] = useState(1);
   const [pastPage, setPastPage] = useState(1);
@@ -92,7 +92,11 @@ export default function MyAppointments() {
     );
   };
 
-  const openReviewModal = (a: Appt, existingReview?: SalonReview) => {
+  const openReviewModal = (
+    a: Appt,
+    existingReview?: SalonReview,
+    initialRating?: number
+  ) => {
     const start = new Date(a.start_time);
     setReviewTarget({
       id: a.id,
@@ -102,6 +106,7 @@ export default function MyAppointments() {
       specialistName: a.specialists?.name,
       dateLabel: `${dateLabel(start)} • ${format(start, "HH:mm")}`,
       existingReview: existingReview || null,
+      initialRating,
     });
   };
 
@@ -137,19 +142,7 @@ export default function MyAppointments() {
             {existingReview ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-0.5">
-                    {Array.from({ length: 5 }).map((_, idx) => (
-                      <Star
-                        key={idx}
-                        className={cn(
-                          "h-3.5 w-3.5",
-                          idx < existingReview.rating
-                            ? "text-amber-400 fill-amber-400"
-                            : "text-muted-foreground/30"
-                        )}
-                      />
-                    ))}
-                  </div>
+                  <StarRating value={existingReview.rating} readOnly size="xs" />
                   <button
                     type="button"
                     onClick={() => openReviewModal(a, existingReview)}
@@ -166,16 +159,30 @@ export default function MyAppointments() {
                 )}
               </div>
             ) : (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => openReviewModal(a)}
-              >
-                <Star className="h-4 w-4 mr-1.5 text-amber-400" />
-                {ro ? "Lasă o recenzie" : "Leave a review"}
-              </Button>
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {ro ? "Alege nota:" : "Rate visit:"}
+                  </span>
+                  <StarRating
+                    value={0}
+                    size="sm"
+                    onChange={(selectedStars) =>
+                      openReviewModal(a, undefined, selectedStars)
+                    }
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => openReviewModal(a)}
+                >
+                  <Star className="h-4 w-4 mr-1.5 text-amber-400" />
+                  {ro ? "Lasă o recenzie" : "Leave a review"}
+                </Button>
+              </div>
             )}
           </div>
         )}

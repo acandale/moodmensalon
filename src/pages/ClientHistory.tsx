@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { ro as roLocale, enUS } from "date-fns/locale";
+import { ro as roLocale } from "date-fns/locale";
 import { ArrowLeft } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
 import { useAuth } from "@/hooks/useAuth";
@@ -31,7 +31,7 @@ export default function ClientHistory() {
   const { data: salon } = useSalonSettings();
   const navigate = useNavigate();
   const ro = language === "ro";
-  const locale = ro ? roLocale : enUS;
+  const locale = roLocale;
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");

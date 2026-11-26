@@ -6,18 +6,17 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Navbar } from "@/components/layout/Navbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Calendar, Clock, Scissors, Plus, Loader2, Star, Pencil } from "lucide-react";
+import { BarChart3, Calendar, CalendarOff, Clock, Scissors, Plus, Loader2, Star, Pencil, User, Settings, MessageSquare, FileText, Palmtree, KeyRound } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { format, isFuture, isToday, parseISO } from "date-fns";
-import { enUS, ro as roLocale } from "date-fns/locale";
+import { ro as roLocale } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { AdminBookAppointment } from "@/components/admin/AdminBookAppointment";
-import { SalonGalleryCarousel } from "@/components/SalonGalleryCarousel";
 import { PushNotificationBanner } from "@/components/notifications/PushNotificationBanner";
 import { SalonReview, useMyReviews } from "@/hooks/useReviews";
 import { ReviewDialog, ReviewTargetAppointment } from "@/components/reviews/ReviewDialog";
-import { cn } from "@/lib/utils";
+import { StarRating } from "@/components/reviews/StarRating";
 
 interface Appointment {
   id: string;
@@ -43,22 +42,25 @@ interface Appointment {
 }
 
 export default function Dashboard() {
-  const { user, profile, isLoading: authLoading, isAdmin, isSpecialist, specialistId } = useAuth();
+  const { user, profile, isLoading: authLoading, isAdmin, isSpecialist, specialistId, isPasswordRecovery } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t, language } = useLanguage();
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const ro = language === "ro";
-  const dateLocale = ro ? roLocale : enUS;
   const queryClient = useQueryClient();
   const [bookDialogOpen, setBookDialogOpen] = useState(false);
   const [reviewTarget, setReviewTarget] = useState<ReviewTargetAppointment | null>(null);
 
   useEffect(() => {
+    if (isPasswordRecovery) {
+      navigate("/auth?mode=reset", { replace: true });
+      return;
+    }
     if (!authLoading && !user) {
       navigate("/auth");
     }
-  }, [user, authLoading, navigate]);
+  }, [user, authLoading, isPasswordRecovery, navigate]);
 
   const { data: appointments = [], isLoading: appointmentsLoading, refetch } = useQuery({
     queryKey: ["my-appointments", user?.id, isAdmin, isSpecialist, specialistId],
@@ -144,12 +146,16 @@ export default function Dashboard() {
       .slice(0, 6);
   }, [appointments, isAdmin, isSpecialist]);
 
-  const openReviewModal = (apt: Appointment, existingReview?: SalonReview) => {
+  const openReviewModal = (
+    apt: Appointment,
+    existingReview?: SalonReview,
+    initialRating?: number
+  ) => {
     const start = parseISO(apt.start_time);
     const formattedDate = format(
       start,
-      ro ? "d MMM yyyy • HH:mm" : "MMM d, yyyy • h:mm a",
-      { locale: dateLocale }
+      "d MMM yyyy • HH:mm",
+      { locale: roLocale }
     );
     setReviewTarget({
       id: apt.id,
@@ -159,6 +165,7 @@ export default function Dashboard() {
       specialistName: apt.specialists?.name,
       dateLabel: formattedDate,
       existingReview: existingReview || null,
+      initialRating,
     });
   };
 
@@ -253,19 +260,151 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {isAdmin && (
-          <Card className="mb-6 border-purple/30 bg-purple/5">
-            <CardContent className="py-4 flex items-center justify-between">
-              <p className="text-sm font-medium text-purple">
-                {t("dashboard.adminAccess")}
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => navigate("/admin")}
-              >
-                {t("dashboard.goAdmin")}
-              </Button>
+        {(isAdmin || isSpecialist) && (
+          <Card className="mb-6 border-purple/20 bg-card/90" variant="elevated">
+            <CardContent className="py-3 px-4 flex flex-wrap items-center gap-2">
+              {isAdmin ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=appointments")}
+                  >
+                    <Calendar className="h-4 w-4 text-purple" />
+                    {t("admin.appointments")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=specialists")}
+                  >
+                    <User className="h-4 w-4 text-purple" />
+                    {ro ? "Specialiști" : "Specialists"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=work-hours")}
+                  >
+                    <Clock className="h-4 w-4 text-purple" />
+                    {ro ? "Program Salon" : "Salon Schedule"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=blocked-times")}
+                  >
+                    <CalendarOff className="h-4 w-4 text-purple" />
+                    {ro ? "Blocări timp" : "Blocked times"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=vacations")}
+                  >
+                    <Palmtree className="h-4 w-4 text-purple" />
+                    {ro ? "Vacanțe" : "Vacations"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=reviews")}
+                  >
+                    <MessageSquare className="h-4 w-4 text-purple" />
+                    {ro ? "Recenzii" : "Reviews"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=settings")}
+                  >
+                    <Settings className="h-4 w-4 text-purple" />
+                    {t("admin.settings")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/client-history")}
+                  >
+                    <FileText className="h-4 w-4 text-purple" />
+                    {ro ? "Fișa clientului" : "Client file"}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=appointments")}
+                  >
+                    <Calendar className="h-4 w-4 text-purple" />
+                    {t("admin.appointments")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=specialists")}
+                  >
+                    <Scissors className="h-4 w-4 text-purple" />
+                    {t("admin.myConfig")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=blocked-times")}
+                  >
+                    <CalendarOff className="h-4 w-4 text-purple" />
+                    {ro ? "Blocări timp" : "Blocked times"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=vacations")}
+                  >
+                    <Palmtree className="h-4 w-4 text-purple" />
+                    {ro ? "Vacanțe" : "Vacations"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/admin?tab=reviews")}
+                  >
+                    <MessageSquare className="h-4 w-4 text-purple" />
+                    {ro ? "Recenzii" : "Reviews"}
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setBookDialogOpen(true)}
+                  >
+                    <Calendar className="h-4 w-4" />
+                    {ro ? "Adaugă programare" : "Add appointment"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => navigate("/client-history")}
+                  >
+                    <FileText className="h-4 w-4 text-purple" />
+                    {ro ? "Fișa clientului" : "Client file"}
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
         )}
@@ -294,15 +433,15 @@ export default function Dashboard() {
                       <p className="text-purple-light text-sm font-medium mb-1 capitalize">
                         {format(
                           parseISO(nextAppointment.start_time),
-                          ro ? "EEEE, d MMMM" : "EEEE, MMMM d",
-                          { locale: dateLocale }
+                          "EEEE, d MMMM",
+                          { locale: roLocale }
                         )}
                       </p>
                       <p className="text-2xl font-bold">
                         {format(
                           parseISO(nextAppointment.start_time),
-                          ro ? "HH:mm" : "h:mm a",
-                          { locale: dateLocale }
+                          "HH:mm",
+                          { locale: roLocale }
                         )}
                       </p>
                     </div>
@@ -369,35 +508,27 @@ export default function Dashboard() {
                 {t("dashboard.bookNew")}
               </Button>
               {!isAdmin && !isSpecialist && (
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={() => navigate("/my-appointments")}
-                >
-                  <Star className="h-4 w-4 text-amber-400" />
-                  {ro ? "Programările și recenziile mele" : "My appointments & reviews"}
-                </Button>
-              )}
-              {isSpecialist && (
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={() => navigate("/admin")}
-                >
-                  <Scissors className="h-4 w-4" />
-                  {t("nav.specialistPanel")}
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={() => navigate("/my-appointments")}
+                  >
+                    <Star className="h-4 w-4 text-amber-400" />
+                    {ro ? "Programările și recenziile mele" : "My appointments & reviews"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={() => navigate("/account")}
+                  >
+                    <KeyRound className="h-4 w-4 text-purple" />
+                    {ro ? "Contul meu / Schimbă parola" : "My account / Change password"}
+                  </Button>
+                </>
               )}
             </CardContent>
           </Card>
-        </div>
-
-        {/* Salon Gallery Carousel */}
-        <div className="mt-6">
-          <SalonGalleryCarousel
-            canManage={isAdmin || isSpecialist}
-            onManageClick={() => navigate(isAdmin ? "/admin?tab=settings" : "/admin?tab=specialists")}
-          />
         </div>
 
         {/* All Appointments */}
@@ -413,8 +544,8 @@ export default function Dashboard() {
                         <div>
                           <p className="font-semibold">{apt.services.name}</p>
                           <p className="text-sm text-muted-foreground">
-                            {format(parseISO(apt.start_time), ro ? "HH:mm" : "h:mm a", { locale: dateLocale })} -{" "}
-                            {format(parseISO(apt.end_time), ro ? "HH:mm" : "h:mm a", { locale: dateLocale })}
+                            {format(parseISO(apt.start_time), "HH:mm", { locale: roLocale })} -{" "}
+                            {format(parseISO(apt.end_time), "HH:mm", { locale: roLocale })}
                           </p>
                           {apt.profiles?.full_name && (
                             <p className="text-xs text-purple mt-1">{t("dashboard.client")}: {apt.profiles.full_name}</p>
@@ -452,8 +583,8 @@ export default function Dashboard() {
                           <p className="text-sm text-muted-foreground capitalize">
                             {format(
                               parseISO(apt.start_time),
-                              ro ? "d MMM, HH:mm" : "MMM d, h:mm a",
-                              { locale: dateLocale }
+                              "d MMM, HH:mm",
+                              { locale: roLocale }
                             )}
                           </p>
                         </div>
@@ -532,8 +663,8 @@ export default function Dashboard() {
                         <p className="text-xs text-muted-foreground capitalize">
                           {format(
                             parseISO(apt.start_time),
-                            ro ? "d MMM yyyy, HH:mm" : "MMM d, yyyy, h:mm a",
-                            { locale: dateLocale }
+                            "d MMM yyyy, HH:mm",
+                            { locale: roLocale }
                           )}
                         </p>
                       </div>
@@ -541,19 +672,7 @@ export default function Dashboard() {
                       {existingReview ? (
                         <div className="pt-3 border-t border-border space-y-2">
                           <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-0.5">
-                              {Array.from({ length: 5 }).map((_, idx) => (
-                                <Star
-                                  key={idx}
-                                  className={cn(
-                                    "h-3.5 w-3.5",
-                                    idx < existingReview.rating
-                                      ? "text-amber-400 fill-amber-400"
-                                      : "text-muted-foreground/30"
-                                  )}
-                                />
-                              ))}
-                            </div>
+                            <StarRating value={existingReview.rating} readOnly size="xs" />
                             <button
                               type="button"
                               onClick={() => openReviewModal(apt, existingReview)}
@@ -570,16 +689,30 @@ export default function Dashboard() {
                           )}
                         </div>
                       ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          onClick={() => openReviewModal(apt)}
-                        >
-                          <Star className="h-4 w-4 mr-1.5 text-amber-400" />
-                          {ro ? "Lasă o recenzie" : "Leave a review"}
-                        </Button>
+                        <div className="pt-3 border-t border-border space-y-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-muted-foreground">
+                              {ro ? "Alege nota:" : "Rate visit:"}
+                            </span>
+                            <StarRating
+                              value={0}
+                              size="sm"
+                              onChange={(selectedStars) =>
+                                openReviewModal(apt, undefined, selectedStars)
+                              }
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => openReviewModal(apt)}
+                          >
+                            <Star className="h-4 w-4 mr-1.5 text-amber-400" />
+                            {ro ? "Lasă o recenzie" : "Leave a review"}
+                          </Button>
+                        </div>
                       )}
                     </CardContent>
                   </Card>

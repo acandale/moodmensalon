@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 
 interface Profile {
@@ -18,6 +19,8 @@ interface AuthContextType {
   isSpecialist: boolean;
   specialistId: string | null;
   isLoading: boolean;
+  isPasswordRecovery: boolean;
+  clearPasswordRecovery: () => void;
   signUp: (email: string, password: string, fullName: string, phone: string) => Promise<{ error: Error | null; data: { user: User | null } | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null; data: { user: User | null } | null }>;
   signOut: () => Promise<void>;
@@ -27,6 +30,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -34,6 +38,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isSpecialist, setIsSpecialist] = useState(false);
   const [specialistId, setSpecialistId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(() =>
+    typeof window !== "undefined" &&
+    (window.location.hash.includes("type=recovery") || window.location.search.includes("type=recovery"))
+  );
+
+  const clearPasswordRecovery = () => setIsPasswordRecovery(false);
 
   const fetchProfile = async (userId: string) => {
     const { data: profileData } = await supabase
@@ -75,13 +85,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    let mounted = true;
+    let initialResolved = false;
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
       setSession(session);
       setUser(session?.user ?? null);
-      
+
+      if (event === "PASSWORD_RECOVERY") {
+        setIsPasswordRecovery(true);
+        if (window.location.pathname !== "/auth") {
+          navigate("/auth?mode=reset", { replace: true });
+        }
+      } else if (event === "SIGNED_OUT") {
+        setIsPasswordRecovery(false);
+      }
+
       if (session?.user) {
         setTimeout(() => {
-          fetchProfile(session.user.id);
+          if (mounted) {
+            fetchProfile(session.user.id);
+          }
         }, 0);
       } else {
         setProfile(null);
@@ -89,23 +114,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsSpecialist(false);
         setSpecialistId(null);
       }
-      
-      setIsLoading(false);
-    });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        fetchProfile(session.user.id);
+      if (initialResolved || event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+        setIsLoading(false);
       }
-      
-      setIsLoading(false);
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        if (!mounted) return;
+        setSession(session);
+        setUser(session?.user ?? null);
+
+        if (session?.user) {
+          fetchProfile(session.user.id);
+        }
+      })
+      .finally(() => {
+        initialResolved = true;
+        if (mounted) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [navigate]);
 
   const signUp = async (email: string, password: string, fullName: string, phone: string) => {
     const redirectUrl = `${window.location.origin}/`;
@@ -146,6 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAdmin(false);
     setIsSpecialist(false);
     setSpecialistId(null);
+    setIsPasswordRecovery(false);
   };
 
   return (
@@ -158,6 +196,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isSpecialist,
         specialistId,
         isLoading,
+        isPasswordRecovery,
+        clearPasswordRecovery,
         signUp,
         signIn,
         signOut,

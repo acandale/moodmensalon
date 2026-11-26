@@ -4,6 +4,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +20,10 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO, isBefore, isSameDay } from "date-fns";
-import { Loader2, Plus, Trash2, Palmtree, CalendarRange } from "lucide-react";
+import { ro } from "date-fns/locale";
+import { Loader2, Plus, Trash2, Palmtree, CalendarRange, Calendar as CalendarIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { capitalizeFirst } from "@/lib/time-format";
 
 interface BlockedDay {
   id: string;
@@ -31,7 +40,13 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [formData, setFormData] = useState({ startDate: "", endDate: "", reason: "" });
+  const [startPickerOpen, setStartPickerOpen] = useState(false);
+  const [endPickerOpen, setEndPickerOpen] = useState(false);
+  const [formData, setFormData] = useState<{
+    startDate: Date | undefined;
+    endDate: Date | undefined;
+    reason: string;
+  }>({ startDate: undefined, endDate: undefined, reason: "" });
 
   const { data: blockedDays = [], isLoading } = useQuery({
     queryKey: ["specialist-blocked-days", specialistId],
@@ -48,9 +63,10 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
 
   const addMutation = useMutation({
     mutationFn: async () => {
+      if (!formData.startDate || !formData.endDate) return;
       const { error } = await supabase.from("blocked_days").insert({
-        start_date: formData.startDate,
-        end_date: formData.endDate,
+        start_date: format(formData.startDate, "yyyy-MM-dd"),
+        end_date: format(formData.endDate, "yyyy-MM-dd"),
         reason: formData.reason || null,
         specialist_id: specialistId,
       });
@@ -59,8 +75,9 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
     onSuccess: () => {
       toast({ title: "Vacanță adăugată cu succes" });
       setDialogOpen(false);
-      setFormData({ startDate: "", endDate: "", reason: "" });
+      setFormData({ startDate: undefined, endDate: undefined, reason: "" });
       queryClient.invalidateQueries({ queryKey: ["specialist-blocked-days", specialistId] });
+      queryClient.invalidateQueries({ queryKey: ["blocked-days-booking"] });
     },
     onError: () => {
       toast({ title: "Eroare la adăugare", variant: "destructive" });
@@ -75,18 +92,21 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
     onSuccess: () => {
       toast({ title: "Vacanță eliminată" });
       queryClient.invalidateQueries({ queryKey: ["specialist-blocked-days", specialistId] });
+      queryClient.invalidateQueries({ queryKey: ["blocked-days-booking"] });
     },
     onError: () => {
       toast({ title: "Eroare la eliminare", variant: "destructive" });
     },
   });
 
-  const today = format(new Date(), "yyyy-MM-dd");
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
   const upcoming = blockedDays.filter(
-    (bd) => !isBefore(parseISO(bd.end_date), new Date()) || isSameDay(parseISO(bd.end_date), new Date())
+    (bd) => !isBefore(parseISO(bd.end_date), startOfToday) || isSameDay(parseISO(bd.end_date), startOfToday)
   );
   const past = blockedDays.filter(
-    (bd) => isBefore(parseISO(bd.end_date), new Date()) && !isSameDay(parseISO(bd.end_date), new Date())
+    (bd) => isBefore(parseISO(bd.end_date), startOfToday) && !isSameDay(parseISO(bd.end_date), startOfToday)
   );
 
   const getDayCount = (start: string, end: string) => {
@@ -118,21 +138,97 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
               <DialogDescription>Blochează o perioadă — nu vor fi posibile programări</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 mt-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
                   <Label>Data început</Label>
-                  <Input type="date" min={today} value={formData.startDate} onChange={(e) => setFormData({ ...formData, startDate: e.target.value, endDate: formData.endDate && formData.endDate < e.target.value ? e.target.value : formData.endDate })} />
+                  <Popover open={startPickerOpen} onOpenChange={setStartPickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !formData.startDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {formData.startDate
+                          ? capitalizeFirst(format(formData.startDate, "d MMM yyyy", { locale: ro }))
+                          : "Alege data"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        weekStartsOn={1}
+                        locale={ro}
+                        selected={formData.startDate}
+                        disabled={(date) => date < startOfToday}
+                        onSelect={(date) => {
+                          if (!date) return;
+                          setFormData((prev) => ({
+                            ...prev,
+                            startDate: date,
+                            endDate: prev.endDate && prev.endDate < date ? date : prev.endDate || date,
+                          }));
+                          setStartPickerOpen(false);
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </div>
-                <div>
+
+                <div className="space-y-1.5">
                   <Label>Data sfârșit</Label>
-                  <Input type="date" min={formData.startDate || today} value={formData.endDate} onChange={(e) => setFormData({ ...formData, endDate: e.target.value })} />
+                  <Popover open={endPickerOpen} onOpenChange={setEndPickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !formData.endDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {formData.endDate
+                          ? capitalizeFirst(format(formData.endDate, "d MMM yyyy", { locale: ro }))
+                          : "Alege data"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        weekStartsOn={1}
+                        locale={ro}
+                        selected={formData.endDate}
+                        disabled={(date) => date < (formData.startDate || startOfToday)}
+                        onSelect={(date) => {
+                          if (!date) return;
+                          setFormData((prev) => ({ ...prev, endDate: date }));
+                          setEndPickerOpen(false);
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
-              <div>
+
+              <div className="space-y-1.5">
                 <Label>Motiv (opțional)</Label>
-                <Input value={formData.reason} onChange={(e) => setFormData({ ...formData, reason: e.target.value })} placeholder="ex: Concediu, Zi liberă" />
+                <Input
+                  value={formData.reason}
+                  onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                  placeholder="ex: Concediu, Zi liberă"
+                />
               </div>
-              <Button className="w-full" variant="hero" onClick={() => addMutation.mutate()} disabled={!formData.startDate || !formData.endDate || addMutation.isPending}>
+
+              <Button
+                className="w-full"
+                variant="hero"
+                onClick={() => addMutation.mutate()}
+                disabled={!formData.startDate || !formData.endDate || addMutation.isPending}
+              >
                 {addMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Blochează zilele"}
               </Button>
             </div>
@@ -149,7 +245,7 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
                 <CalendarRange className="h-4 w-4 text-orange-600" />
                 <div>
                   <p className="font-medium text-sm">
-                    {format(parseISO(bd.start_date), "d MMM yyyy")} – {format(parseISO(bd.end_date), "d MMM yyyy")}
+                    {format(parseISO(bd.start_date), "d MMM yyyy", { locale: ro })} – {format(parseISO(bd.end_date), "d MMM yyyy", { locale: ro })}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {getDayCount(bd.start_date, bd.end_date)} {getDayCount(bd.start_date, bd.end_date) > 1 ? "zile" : "zi"}
@@ -179,7 +275,7 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
                 <CalendarRange className="h-4 w-4 text-muted-foreground" />
                 <div>
                   <p className="font-medium text-sm">
-                    {format(parseISO(bd.start_date), "d MMM yyyy")} – {format(parseISO(bd.end_date), "d MMM yyyy")}
+                    {format(parseISO(bd.start_date), "d MMM yyyy", { locale: ro })} – {format(parseISO(bd.end_date), "d MMM yyyy", { locale: ro })}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {getDayCount(bd.start_date, bd.end_date)} {getDayCount(bd.start_date, bd.end_date) > 1 ? "zile" : "zi"}

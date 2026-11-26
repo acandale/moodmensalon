@@ -9,7 +9,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { format, addMinutes } from "date-fns";
-import { ro, enUS } from "date-fns/locale";
+import { ro } from "date-fns/locale";
 import { Scissors, Clock, ArrowLeft, ArrowRight, Loader2, Check, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -42,8 +42,8 @@ export default function BookingPage() {
   const { user, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { t, language } = useLanguage();
-  const dateLocale = language === "ro" ? ro : enUS;
+  const { t } = useLanguage();
+  const dateLocale = ro;
   const formatCapitalized = (date: Date, pattern: string) => {
     const formatted = format(date, pattern, { locale: dateLocale });
     return formatted.charAt(0).toUpperCase() + formatted.slice(1);
@@ -205,7 +205,7 @@ export default function BookingPage() {
       });
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
-      toast({ title: t("booking.confirmed"), description: `${selectedService.name} - ${selectedSpecialist.name} - ${format(startTime, language === "ro" ? "d MMMM 'la' HH:mm" : "MMMM d 'at' h:mm a", { locale: dateLocale })}` });
+      toast({ title: t("booking.confirmed"), description: `${selectedService.name} - ${selectedSpecialist.name} - ${format(startTime, "d MMMM 'la' HH:mm", { locale: dateLocale })}` });
       navigate("/dashboard");
     } catch (error: any) {
       const isOverlap = error?.message?.includes("overlap");
@@ -351,13 +351,13 @@ export default function BookingPage() {
               <Card variant="elevated">
                 <CardHeader><CardTitle>{t("booking.selectDate")}</CardTitle></CardHeader>
                 <CardContent>
-                  <Calendar mode="single" selected={selectedDate} onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); }} disabled={isDateDisabled} locale={dateLocale} className="rounded-md" />
+                  <Calendar mode="single" selected={selectedDate} onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); }} disabled={isDateDisabled} weekStartsOn={1} locale={dateLocale} className="rounded-md" />
                 </CardContent>
               </Card>
               <Card variant="elevated">
                 <CardHeader>
                   <CardTitle>{t("booking.selectTime")}</CardTitle>
-                  <CardDescription>{selectedDate ? formatCapitalized(selectedDate, language === "ro" ? "EEEE, d MMMM" : "EEEE, MMMM d") : t("booking.selectDateFirst")}</CardDescription>
+                  <CardDescription>{selectedDate ? formatCapitalized(selectedDate, "EEEE, d MMMM") : t("booking.selectDateFirst")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {selectedDate ? (
@@ -365,7 +365,7 @@ export default function BookingPage() {
                       <div className="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
                         {timeSlots.map((time) => (
                           <Button key={time} variant={selectedTime === time ? "secondary" : "outline"} size="sm" onClick={() => setSelectedTime(time)} className={cn(selectedTime === time && "ring-2 ring-purple")}>
-                            {format(new Date(`2000-01-01T${time}`), language === "ro" ? "HH:mm" : "h:mm a")}
+                            {format(new Date(`2000-01-01T${time}`), "HH:mm")}
                           </Button>
                         ))}
                       </div>
@@ -415,11 +415,11 @@ export default function BookingPage() {
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/20">
                       <div>
                         <p className="text-white/60 text-sm">{t("booking.date")}</p>
-                        <p className="font-semibold">{formatCapitalized(selectedDate, language === "ro" ? "d MMMM yyyy" : "MMMM d, yyyy")}</p>
+                        <p className="font-semibold">{formatCapitalized(selectedDate, "d MMMM yyyy")}</p>
                       </div>
                       <div>
                         <p className="text-white/60 text-sm">{t("booking.time")}</p>
-                        <p className="font-semibold">{format(new Date(`2000-01-01T${selectedTime}`), language === "ro" ? "HH:mm" : "h:mm a")}</p>
+                        <p className="font-semibold">{format(new Date(`2000-01-01T${selectedTime}`), "HH:mm")}</p>
                       </div>
                       <div>
                         <p className="text-white/60 text-sm">{t("booking.duration")}</p>

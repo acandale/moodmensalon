@@ -23,15 +23,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, Pencil, Trash2, Save, Clock, Scissors, CalendarOff, Palmtree, ImagePlus } from "lucide-react";
+import { Loader2, Plus, Pencil, Trash2, Save, Clock, Scissors, ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BlockedTimesCalendar } from "./BlockedTimesCalendar";
-import { VacationsManager } from "./VacationsManager";
 import { SalonGalleryManager } from "./SalonGalleryManager";
 import { useLanguage } from "@/hooks/useLanguage";
 import { BookingSlotMode } from "@/lib/booking-slots";
+import { ORDERED_WEEK_DAYS, TIME_OPTIONS_24H, normalizeHHMM } from "@/lib/time-format";
 
 interface Specialist {
   id: string;
@@ -62,10 +61,6 @@ interface Service {
   duration_minutes: number;
   price: number;
 }
-
-const DAYS_OF_WEEK = [
-  "Duminică", "Luni", "Marți", "Miercuri", "Joi", "Vineri", "Sâmbătă",
-];
 
 export function SpecialistsManager({ restrictToSpecialistId }: SpecialistsManagerProps = {}) {
   const { toast } = useToast();
@@ -495,14 +490,6 @@ export function SpecialistsManager({ restrictToSpecialistId }: SpecialistsManage
                   <Clock className="h-4 w-4" />
                   Program
                 </TabsTrigger>
-                <TabsTrigger value="blocked-times" className="flex items-center gap-2">
-                  <CalendarOff className="h-4 w-4" />
-                  Blocări timp
-                </TabsTrigger>
-                <TabsTrigger value="vacations" className="flex items-center gap-2">
-                  <Palmtree className="h-4 w-4" />
-                  Vacanțe
-                </TabsTrigger>
                 <TabsTrigger value="gallery" className="flex items-center gap-2">
                   <ImagePlus className="h-4 w-4" />
                   {isRo ? "Galerie Foto" : "Photo Gallery"}
@@ -545,37 +532,64 @@ export function SpecialistsManager({ restrictToSpecialistId }: SpecialistsManage
 
               <TabsContent value="schedule">
                 <div className="space-y-3">
-                  {DAYS_OF_WEEK.map((day, index) => {
+                  {ORDERED_WEEK_DAYS.map(({ index, label }) => {
                     const isWorking = getWHValue(index, "is_working_day") as boolean;
+                    const startVal = normalizeHHMM(getWHValue(index, "start_time") as string);
+                    const endVal = normalizeHHMM(getWHValue(index, "end_time") as string);
+                    const startOptions = startVal && !TIME_OPTIONS_24H.includes(startVal)
+                      ? [startVal, ...TIME_OPTIONS_24H]
+                      : TIME_OPTIONS_24H;
+                    const endOptions = endVal && !TIME_OPTIONS_24H.includes(endVal)
+                      ? [endVal, ...TIME_OPTIONS_24H]
+                      : TIME_OPTIONS_24H;
+
                     return (
-                      <div key={day} className="flex flex-col sm:flex-row sm:items-center gap-4 p-3 rounded-lg border bg-card">
+                      <div key={label} className="flex flex-col sm:flex-row sm:items-center gap-4 p-3 rounded-lg border bg-card">
                         <div className="flex items-center gap-3 min-w-[140px]">
                           <Switch
                             checked={isWorking}
                             onCheckedChange={(checked) => handleWHChange(index, "is_working_day", checked)}
                           />
-                          <Label className="font-medium">{day}</Label>
+                          <Label className="font-medium">{label}</Label>
                         </div>
                         {isWorking ? (
                           <div className="flex items-center gap-2 flex-1">
                             <div className="flex-1">
                               <Label className="text-xs text-muted-foreground">Început</Label>
-                              <Input
-                                type="time"
-                                value={getWHValue(index, "start_time") as string}
-                                onChange={(e) => handleWHChange(index, "start_time", e.target.value)}
-                                className="mt-1"
-                              />
+                              <Select
+                                value={startVal}
+                                onValueChange={(value) => handleWHChange(index, "start_time", value)}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="09:00" />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-60">
+                                  {startOptions.map((time) => (
+                                    <SelectItem key={time} value={time}>
+                                      {time}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
                             <span className="text-muted-foreground mt-5">–</span>
                             <div className="flex-1">
                               <Label className="text-xs text-muted-foreground">Sfârșit</Label>
-                              <Input
-                                type="time"
-                                value={getWHValue(index, "end_time") as string}
-                                onChange={(e) => handleWHChange(index, "end_time", e.target.value)}
-                                className="mt-1"
-                              />
+                              <Select
+                                value={endVal}
+                                onValueChange={(value) => handleWHChange(index, "end_time", value)}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="18:00" />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-60">
+                                  {endOptions.map((time) => (
+                                    <SelectItem key={time} value={time}>
+                                      {time}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
                           </div>
                         ) : (
@@ -595,14 +609,6 @@ export function SpecialistsManager({ restrictToSpecialistId }: SpecialistsManage
                     </Button>
                   )}
                 </div>
-              </TabsContent>
-
-              <TabsContent value="blocked-times">
-                <BlockedTimesCalendar specialistId={selectedSpecialist.id} />
-              </TabsContent>
-
-              <TabsContent value="vacations">
-                <VacationsManager specialistId={selectedSpecialist.id} />
               </TabsContent>
 
               <TabsContent value="gallery">

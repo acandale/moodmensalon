@@ -42,9 +42,18 @@ import { Loader2, ChevronsUpDown, Check } from "lucide-react";
 interface AdminBookAppointmentProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  defaultSpecialistId?: string;
+  defaultDate?: Date;
+  defaultTime?: string;
 }
 
-export function AdminBookAppointment({ open, onOpenChange }: AdminBookAppointmentProps) {
+export function AdminBookAppointment({
+  open,
+  onOpenChange,
+  defaultSpecialistId,
+  defaultDate,
+  defaultTime,
+}: AdminBookAppointmentProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { specialistId: mySpecialistId } = useAuth();
@@ -166,11 +175,21 @@ export function AdminBookAppointment({ open, onOpenChange }: AdminBookAppointmen
     enabled: !!selectedSpecialistId && open,
   });
 
-  // Auto-populate: logged-in specialist
+  // Auto-populate: logged-in specialist or clicked slot defaults
   useEffect(() => {
     if (!open) return;
-    if (mySpecialistId) setSelectedSpecialistId((s) => s || mySpecialistId);
-  }, [open, mySpecialistId]);
+    if (mySpecialistId) {
+      setSelectedSpecialistId((s) => s || mySpecialistId);
+    } else if (defaultSpecialistId) {
+      setSelectedSpecialistId(defaultSpecialistId);
+    }
+    if (defaultDate) {
+      setSelectedDate(defaultDate);
+    }
+    if (defaultTime) {
+      setSelectedTime(defaultTime);
+    }
+  }, [open, mySpecialistId, defaultSpecialistId, defaultDate, defaultTime]);
 
   // Auto-select first available service
   useEffect(() => {
@@ -201,8 +220,13 @@ export function AdminBookAppointment({ open, onOpenChange }: AdminBookAppointmen
   const timeSlots = generateTimeSlots();
 
   useEffect(() => {
-    if (selectedTime && !timeSlots.includes(selectedTime)) setSelectedTime(null);
-  }, [selectedTime, timeSlots]);
+    if (appointmentsLoading || blockedTimesLoading || specialistWorkHours.length === 0 || !selectedService) {
+      return;
+    }
+    if (selectedTime && !timeSlots.includes(selectedTime)) {
+      setSelectedTime(null);
+    }
+  }, [selectedTime, timeSlots, appointmentsLoading, blockedTimesLoading, specialistWorkHours.length, selectedService]);
 
   const isDateDisabled = (date: Date) => {
     if (!selectedSpecialistId || !selectedService) return true;
@@ -390,7 +414,7 @@ export function AdminBookAppointment({ open, onOpenChange }: AdminBookAppointmen
           {selectedSpecialistId && selectedServiceId && (
             <div className="space-y-2">
               <label className="text-sm font-medium">Data</label>
-              <Calendar mode="single" selected={selectedDate} onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); }} disabled={isDateDisabled} locale={ro} className={cn("rounded-md border pointer-events-auto")} />
+              <Calendar mode="single" selected={selectedDate} onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); }} disabled={isDateDisabled} weekStartsOn={1} locale={ro} className={cn("rounded-md border pointer-events-auto")} />
             </div>
           )}
 

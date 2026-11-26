@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useSalonSettings } from "@/hooks/useSalonSettings";
 import { useLanguage } from "@/hooks/useLanguage";
 import { getInitials, SalonReview, usePublicReviews } from "@/hooks/useReviews";
-import { cn } from "@/lib/utils";
+import { StarRating } from "@/components/reviews/StarRating";
 
 const INITIAL_VISIBLE = 4;
 const COMMENT_TRUNCATE_LIMIT = 155;
@@ -50,23 +50,8 @@ function ReviewCardItem({
             </div>
 
             {/* Stars + "5 din 5" */}
-            <div className="flex items-center gap-2 mt-1">
-              <div className="flex items-center gap-0.5" aria-label={`${review.rating} / 5`}>
-                {Array.from({ length: 5 }).map((_, idx) => (
-                  <Star
-                    key={idx}
-                    className={cn(
-                      "h-4 w-4",
-                      idx < review.rating
-                        ? "text-amber-400 fill-amber-400"
-                        : "text-muted-foreground/30"
-                    )}
-                  />
-                ))}
-              </div>
-              <span className="text-sm font-medium text-foreground/90">
-                {review.rating} {isRo ? "din" : "out of"} 5
-              </span>
+            <div className="mt-1">
+              <StarRating value={review.rating} readOnly size="sm" showScore />
             </div>
 
             {/* Comment text */}

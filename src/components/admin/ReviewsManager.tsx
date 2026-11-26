@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { format, parseISO } from "date-fns";
-import { enUS, ro as roLocale } from "date-fns/locale";
+import { ro as roLocale } from "date-fns/locale";
 import {
   AlertTriangle,
   Check,
@@ -10,7 +10,6 @@ import {
   Loader2,
   MessageSquare,
   Send,
-  Star,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,6 +24,7 @@ import {
   useReplyToReview,
   useToggleReviewVisibility,
 } from "@/hooks/useReviews";
+import { StarRating } from "@/components/reviews/StarRating";
 import { cn } from "@/lib/utils";
 
 interface ReviewsManagerProps {
@@ -34,7 +34,6 @@ interface ReviewsManagerProps {
 export function ReviewsManager({ restrictToSpecialistId }: ReviewsManagerProps) {
   const { language } = useLanguage();
   const isRo = language === "ro";
-  const dateLocale = isRo ? roLocale : enUS;
   const { toast } = useToast();
 
   const { data, isLoading } = useAdminReviews(restrictToSpecialistId);
@@ -163,21 +162,9 @@ export function ReviewsManager({ restrictToSpecialistId }: ReviewsManagerProps) 
                       <div>
                         <p className="font-semibold text-foreground">{review.author_name}</p>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <div className="flex items-center gap-0.5">
-                            {Array.from({ length: 5 }).map((_, idx) => (
-                              <Star
-                                key={idx}
-                                className={cn(
-                                  "h-3.5 w-3.5",
-                                  idx < review.rating
-                                    ? "text-amber-400 fill-amber-400"
-                                    : "text-muted-foreground/30"
-                                )}
-                              />
-                            ))}
-                          </div>
+                          <StarRating value={review.rating} readOnly size="xs" />
                           <span className="text-xs text-muted-foreground">
-                            {format(parseISO(review.created_at), "d MMM yyyy", { locale: dateLocale })}
+                            {format(parseISO(review.created_at), "d MMM yyyy", { locale: roLocale })}
                           </span>
                           {(review.services?.name || review.specialists?.name) && (
                             <span className="text-xs text-muted-foreground">

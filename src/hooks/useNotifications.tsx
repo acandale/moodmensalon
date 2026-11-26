@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addHours, format, parseISO } from "date-fns";
-import { enUS, ro as roLocale } from "date-fns/locale";
+import { ro as roLocale } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/hooks/useLanguage";
@@ -138,7 +138,6 @@ export function useNotifications() {
   const { user } = useAuth();
   const { language } = useLanguage();
   const isRo = language === "ro";
-  const dateLocale = isRo ? roLocale : enUS;
   const queryClient = useQueryClient();
   const [localReadVersion, setLocalReadVersion] = useState(0);
 
@@ -190,8 +189,8 @@ export function useNotifications() {
             (apt.specialists as { name?: string } | null)?.name || null;
           const formattedDate = format(
             start,
-            isRo ? "d MMMM 'la' HH:mm" : "MMMM d 'at' h:mm a",
-            { locale: dateLocale }
+            "d MMMM 'la' HH:mm",
+            { locale: roLocale }
           );
           const withSpec = specialistName ? (isRo ? ` cu ${specialistName}` : ` with ${specialistName}`) : "";
 

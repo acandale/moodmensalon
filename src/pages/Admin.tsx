@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/hooks/useLanguage";
 import { Navbar } from "@/components/layout/Navbar";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -29,6 +29,7 @@ import {
   startOfWeek,
   endOfWeek,
 } from "date-fns";
+import { ro } from "date-fns/locale";
 import {
   ChevronLeft,
   ChevronRight,
@@ -36,6 +37,8 @@ import {
   User,
   Scissors,
   Calendar,
+  CalendarOff,
+  Palmtree,
   X,
   Settings,
   MessageSquare,
@@ -47,6 +50,10 @@ import { AdminBookAppointment } from "@/components/admin/AdminBookAppointment";
 import { SalonSettingsManager } from "@/components/admin/SalonSettingsManager";
 import { SpecialistsManager } from "@/components/admin/SpecialistsManager";
 import { ReviewsManager } from "@/components/admin/ReviewsManager";
+import { BlockedTimesCalendar } from "@/components/admin/BlockedTimesCalendar";
+import { VacationsManager } from "@/components/admin/VacationsManager";
+import { SpecialistSplitCalendar } from "@/components/admin/SpecialistSplitCalendar";
+import { capitalizeFirst } from "@/lib/time-format";
 
 interface ProfileInfo {
   full_name: string;
@@ -60,7 +67,7 @@ interface AppointmentWithDetails {
   end_time: string;
   status: string;
   notes: string | null;
-  user_id: string;
+  user_id: string | null;
   specialist_id: string | null;
   profiles: ProfileInfo | null;
   services: {
@@ -77,7 +84,7 @@ const SERVICE_COLORS: Record<string, string> = {
 };
 
 type ViewMode = "month" | "week" | "day";
-type AdminTab = "appointments" | "settings" | "specialists" | "work-hours" | "reviews";
+type AdminTab = "appointments" | "settings" | "specialists" | "work-hours" | "blocked-times" | "vacations" | "reviews";
 
 export default function AdminPage() {
   const { user, isAdmin, isSpecialist, specialistId, isLoading: authLoading } = useAuth();
@@ -89,15 +96,30 @@ export default function AdminPage() {
 
   const tabParam = searchParams.get("tab");
   const initialTab: AdminTab =
-    tabParam === "settings" || tabParam === "specialists" || tabParam === "work-hours" || tabParam === "reviews"
+    tabParam === "settings" ||
+    tabParam === "specialists" ||
+    tabParam === "work-hours" ||
+    tabParam === "blocked-times" ||
+    tabParam === "vacations" ||
+    tabParam === "reviews"
       ? tabParam
       : "appointments";
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
   const [bookDialogOpen, setBookDialogOpen] = useState(false);
+  const [bookDefaults, setBookDefaults] = useState<{
+    specialistId?: string;
+    date?: Date;
+    time?: string;
+  }>({});
   const [filterSpecialistId, setFilterSpecialistId] = useState<string | null>(null);
+  const [selectedBlockSpecialistId, setSelectedBlockSpecialistId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && (!user || (!isAdmin && !isSpecialist))) {
@@ -109,16 +131,17 @@ export default function AdminPage() {
   useEffect(() => {
     if (isSpecialist && specialistId) {
       setFilterSpecialistId(specialistId);
+      setSelectedBlockSpecialistId(specialistId);
     }
   }, [isSpecialist, specialistId]);
 
-  // Fetch specialists for filter dropdown
+  // Fetch specialists for filter dropdown & split columns
   const { data: specialists = [] } = useQuery({
     queryKey: ["admin-specialists-list"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("specialists")
-        .select("id, name")
+        .select("id, name, title")
         .eq("is_active", true)
         .order("name");
       if (error) throw error;
@@ -127,20 +150,29 @@ export default function AdminPage() {
     enabled: !!user && (isAdmin || isSpecialist),
   });
 
-  // Fetch work hours for dynamic calendar range
-  const { data: workHours = [] } = useQuery({
-    queryKey: ["admin-work-hours-range", filterSpecialistId],
+  useEffect(() => {
+    if (!selectedBlockSpecialistId && specialists.length > 0) {
+      setSelectedBlockSpecialistId(filterSpecialistId || specialists[0].id);
+    }
+  }, [specialists, filterSpecialistId, selectedBlockSpecialistId]);
+
+  // Fetch all specialist work hours + salon fallback hours
+  const { data: specialistWorkHours = [] } = useQuery({
+    queryKey: ["admin-all-specialist-work-hours"],
     queryFn: async () => {
-      // If filtering by specialist, use specialist work hours
-      if (filterSpecialistId) {
-        const { data, error } = await supabase
-          .from("specialist_work_hours")
-          .select("*")
-          .eq("specialist_id", filterSpecialistId)
-          .order("day_of_week", { ascending: true });
-        if (error) throw error;
-        return data;
-      }
+      const { data, error } = await supabase
+        .from("specialist_work_hours")
+        .select("*")
+        .order("day_of_week", { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user && (isAdmin || isSpecialist),
+  });
+
+  const { data: salonWorkHours = [] } = useQuery({
+    queryKey: ["admin-salon-work-hours"],
+    queryFn: async () => {
       const { data, error } = await supabase
         .from("work_hours")
         .select("*")
@@ -152,8 +184,9 @@ export default function AdminPage() {
   });
 
   // Fetch blocked times for day view
+  const dayDateKey = format(currentDate, "yyyy-MM-dd");
   const { data: dayBlockedTimes = [] } = useQuery({
-    queryKey: ["admin-day-blocked-times", currentDate.toISOString(), viewMode, filterSpecialistId],
+    queryKey: ["admin-day-blocked-times", dayDateKey, filterSpecialistId],
     queryFn: async () => {
       const startDate = new Date(currentDate);
       startDate.setHours(0, 0, 0, 0);
@@ -178,24 +211,45 @@ export default function AdminPage() {
     enabled: !!user && (isAdmin || isSpecialist) && viewMode === "day",
   });
 
-  // Fetch appointments
-  const { data: appointments = [], isLoading, isFetching } = useQuery({
-    queryKey: ["admin-appointments", currentDate.toISOString(), viewMode, filterSpecialistId],
+  // Fetch vacations (blocked_days) overlapping the selected date
+  const { data: dayBlockedDays = [] } = useQuery({
+    queryKey: ["admin-day-blocked-days", dayDateKey, filterSpecialistId],
+    queryFn: async () => {
+      let query = supabase
+        .from("blocked_days")
+        .select("*")
+        .lte("start_date", dayDateKey)
+        .gte("end_date", dayDateKey);
+
+      if (filterSpecialistId) {
+        query = query.eq("specialist_id", filterSpecialistId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user && (isAdmin || isSpecialist) && viewMode === "day",
+  });
+
+  // Fetch appointments (full week when in day split-view for instant strip switching & indicators)
+  const queryRangeKey =
+    viewMode === "month"
+      ? format(currentDate, "yyyy-MM")
+      : format(startOfWeek(currentDate, { weekStartsOn: 1 }), "yyyy-MM-dd");
+
+  const { data: appointments = [], isLoading } = useQuery({
+    queryKey: ["admin-appointments", queryRangeKey, viewMode === "month" ? "month" : "week", filterSpecialistId],
     queryFn: async () => {
       let startDate: Date;
       let endDate: Date;
 
       if (viewMode === "month") {
-        startDate = startOfMonth(currentDate);
-        endDate = endOfMonth(currentDate);
-      } else if (viewMode === "week") {
-        startDate = startOfWeek(currentDate);
-        endDate = endOfWeek(currentDate);
+        startDate = startOfWeek(startOfMonth(currentDate), { weekStartsOn: 1 });
+        endDate = endOfWeek(endOfMonth(currentDate), { weekStartsOn: 1 });
       } else {
-        startDate = new Date(currentDate);
-        startDate.setHours(0, 0, 0, 0);
-        endDate = new Date(currentDate);
-        endDate.setHours(23, 59, 59, 999);
+        startDate = startOfWeek(currentDate, { weekStartsOn: 1 });
+        endDate = endOfWeek(currentDate, { weekStartsOn: 1 });
       }
 
       let query = supabase
@@ -208,6 +262,8 @@ export default function AdminPage() {
           notes,
           user_id,
           specialist_id,
+          guest_name,
+          guest_phone,
           services (
             name,
             duration_minutes,
@@ -224,9 +280,9 @@ export default function AdminPage() {
 
       const { data, error } = await query;
       if (error) throw error;
-      
+
       // Fetch profiles for all appointments
-      const userIds = [...new Set((data || []).map(apt => apt.user_id).filter(Boolean))] as string[];
+      const userIds = [...new Set((data || []).map((apt) => apt.user_id).filter(Boolean))] as string[];
 
       let profilesMap = new Map<string, { full_name: string; email: string; phone: string }>();
       if (userIds.length > 0) {
@@ -236,14 +292,17 @@ export default function AdminPage() {
           .in("id", userIds);
 
         profilesMap = new Map(
-          profilesData?.map(p => [p.id, { full_name: p.full_name, email: p.email, phone: p.phone }]) || []
+          profilesData?.map((p) => [p.id, { full_name: p.full_name, email: p.email, phone: p.phone }]) || []
         );
       }
 
       return (data || []).map((apt: any) => ({
         ...apt,
-        profiles: (apt.user_id ? profilesMap.get(apt.user_id) : null)
-          || (apt.guest_name ? { full_name: apt.guest_name, email: "", phone: apt.guest_phone || "" } : null)
+        profiles:
+          (apt.user_id ? profilesMap.get(apt.user_id) : null) ||
+          (apt.guest_name
+            ? { full_name: apt.guest_name, email: "", phone: apt.guest_phone || "" }
+            : null),
       })) as AppointmentWithDetails[];
     },
     enabled: !!user && (isAdmin || isSpecialist),
@@ -260,7 +319,7 @@ export default function AdminPage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "Appointment cancelled" });
+      toast({ title: "Programare anulată" });
       setSelectedAppointment(null);
       queryClient.invalidateQueries({ queryKey: ["admin-appointments"] });
     },
@@ -275,14 +334,14 @@ export default function AdminPage() {
   const renderMonthView = () => {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
-    const calendarStart = startOfWeek(monthStart);
-    const calendarEnd = endOfWeek(monthEnd);
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
 
     const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
     return (
       <div className="grid grid-cols-7 gap-1">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+        {["Lun", "Mar", "Mie", "Joi", "Vin", "Sâm", "Dum"].map((day) => (
           <div
             key={day}
             className="p-2 text-center text-sm font-medium text-muted-foreground"
@@ -299,7 +358,7 @@ export default function AdminPage() {
             <div
               key={day.toISOString()}
               className={cn(
-                "min-h-[100px] p-2 border rounded-lg transition-colors",
+                "min-h-[100px] p-2 border rounded-lg transition-colors cursor-pointer",
                 isCurrentMonth ? "bg-card" : "bg-muted/30",
                 isToday && "ring-2 ring-purple"
               )}
@@ -331,12 +390,12 @@ export default function AdminPage() {
                     }}
                   >
                     {format(parseISO(apt.start_time), "HH:mm")} -{" "}
-                    {apt.profiles?.full_name?.split(" ")[0] || "Unknown"}
+                    {apt.profiles?.full_name?.split(" ")[0] || "Necunoscut"}
                   </div>
                 ))}
                 {dayAppointments.length > 3 && (
                   <div className="text-xs text-muted-foreground">
-                    +{dayAppointments.length - 3} more
+                    +{dayAppointments.length - 3} în plus
                   </div>
                 )}
               </div>
@@ -347,137 +406,37 @@ export default function AdminPage() {
     );
   };
 
-  const SLOT_HEIGHT = 40;
+  const openQuickBook = (params?: { specialistId?: string; date?: Date; time?: string }) => {
+    setBookDefaults(params || {});
+    setBookDialogOpen(true);
+  };
 
-  const renderDayView = () => {
-    const dayAppointments = getAppointmentsForDay(currentDate);
-
-    // Determine day range from work hours, with fallback 8-20
-    const dayOfWeek = currentDate.getDay();
-    const todayWorkHour = workHours.find((wh: any) => wh.day_of_week === dayOfWeek);
-    let dayStartHour = 8;
-    let dayEndHour = 20;
-    if (todayWorkHour && todayWorkHour.is_working_day) {
-      const [sh] = todayWorkHour.start_time.split(":").map(Number);
-      const [eh, em] = todayWorkHour.end_time.split(":").map(Number);
-      dayStartHour = sh;
-      dayEndHour = em > 0 ? eh + 1 : eh;
-    }
-
-    const slots: { hour: number; minute: number }[] = [];
-    for (let h = dayStartHour; h < dayEndHour; h++) {
-      for (let m = 0; m < 60; m += 15) {
-        slots.push({ hour: h, minute: m });
-      }
-    }
-
-    const getSlotIndex = (hour: number, minute: number) =>
-      (hour - dayStartHour) * 4 + minute / 15;
-
-    const isSlotBlocked = (hour: number, minute: number) => {
-      const slotTime = new Date(currentDate);
-      slotTime.setHours(hour, minute, 0, 0);
-      return dayBlockedTimes.find((bt) => {
-        const btStart = parseISO(bt.start_time);
-        const btEnd = parseISO(bt.end_time);
-        return slotTime >= btStart && slotTime < btEnd;
-      });
-    };
+  const renderSplitDayView = () => {
+    const weekAppointmentDates = appointments
+      .filter((apt) => apt.status !== "cancelled")
+      .map((apt) => parseISO(apt.start_time));
 
     return (
-      <div className="relative">
-        {/* Time slots background */}
-        {slots.map(({ hour, minute }) => {
-          const blocked = isSlotBlocked(hour, minute);
-          const isHourMark = minute === 0;
-
-          return (
-            <div
-              key={`${hour}-${minute}`}
-              className="flex gap-4"
-              style={{ height: SLOT_HEIGHT }}
-            >
-              <div className={cn(
-                "w-20 text-sm text-muted-foreground text-right pr-2 shrink-0 flex items-start pt-1",
-                !isHourMark && "text-xs opacity-60"
-              )}>
-                {format(new Date(2000, 0, 1, hour, minute), "h:mm a")}
-              </div>
-              <div className={cn(
-                "flex-1 border-l-2 pl-4",
-                isHourMark ? "border-muted-foreground/30" : "border-muted"
-              )}>
-                {blocked && (
-                  <div className="bg-destructive/15 text-destructive text-xs p-1.5 rounded border border-destructive/20">
-                    🚫 {blocked.reason || "Blocked"}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Appointments overlay */}
-        {dayAppointments.map((apt) => {
-          const start = parseISO(apt.start_time);
-          const end = parseISO(apt.end_time);
-          const startSlot = getSlotIndex(start.getHours(), start.getMinutes());
-          const durationMinutes = (end.getTime() - start.getTime()) / 60000;
-          const spanSlots = durationMinutes / 15;
-          const leftOffset = 96;
-
-          return (
-            <div
-              key={apt.id}
-              className="absolute right-0"
-              style={{
-                top: startSlot * SLOT_HEIGHT + 2,
-                height: spanSlots * SLOT_HEIGHT - 4,
-                left: leftOffset,
-              }}
-            >
-              <Card
-                className={cn(
-                  "h-full cursor-pointer overflow-hidden",
-                  apt.status === "cancelled" && "opacity-50"
-                )}
-                onClick={() => setSelectedAppointment(apt)}
-              >
-                <CardContent className="p-2 h-full flex items-center">
-                  <div className="flex items-center justify-between w-full">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={cn(
-                          "w-2 rounded-full self-stretch min-h-[20px]",
-                          SERVICE_COLORS[apt.services.name] || "bg-purple"
-                        )}
-                      />
-                      <div>
-                        <p className="font-medium text-sm">{apt.profiles?.full_name || "Unknown Client"}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {apt.services.name} • {format(start, "h:mm a")} - {format(end, "h:mm a")}
-                        </p>
-                      </div>
-                    </div>
-                    <span
-                      className={cn(
-                        "text-xs px-2 py-1 rounded-full shrink-0",
-                        apt.status === "confirmed"
-                          ? "bg-green-100 text-green-700"
-                          : apt.status === "cancelled"
-                          ? "bg-red-100 text-red-700"
-                          : "bg-gray-100 text-gray-700"
-                      )}
-                    >
-                      {apt.status}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          );
-        })}
-      </div>
+      <SpecialistSplitCalendar
+        currentDate={currentDate}
+        onDateChange={setCurrentDate}
+        specialists={specialists}
+        selectedSpecialistId={filterSpecialistId}
+        onSelectSpecialistFilter={isAdmin ? setFilterSpecialistId : undefined}
+        isAdmin={isAdmin}
+        appointments={appointments}
+        weekAppointmentDates={weekAppointmentDates}
+        specialistWorkHours={specialistWorkHours}
+        salonWorkHours={salonWorkHours}
+        blockedTimes={dayBlockedTimes}
+        blockedDays={dayBlockedDays}
+        onSelectAppointment={(apt) => setSelectedAppointment(apt)}
+        onQuickBook={(params) => openQuickBook(params)}
+        onOpenBlockedTimes={(specId) => {
+          setSelectedBlockSpecialistId(specId);
+          setActiveTab("blocked-times");
+        }}
+      />
     );
   };
 
@@ -521,6 +480,14 @@ export default function AdminPage() {
                   <Calendar className="h-4 w-4" />
                   Program Salon
                 </TabsTrigger>
+                <TabsTrigger value="blocked-times" className="flex items-center gap-2">
+                  <CalendarOff className="h-4 w-4" />
+                  Blocări timp
+                </TabsTrigger>
+                <TabsTrigger value="vacations" className="flex items-center gap-2">
+                  <Palmtree className="h-4 w-4" />
+                  Vacanțe
+                </TabsTrigger>
                 <TabsTrigger value="reviews" className="flex items-center gap-2">
                   <MessageSquare className="h-4 w-4" />
                   {language === "ro" ? "Recenzii" : "Reviews"}
@@ -531,11 +498,19 @@ export default function AdminPage() {
                 </TabsTrigger>
               </>
             )}
-            {isSpecialist && (
+            {isSpecialist && !isAdmin && (
               <>
                 <TabsTrigger value="specialists" className="flex items-center gap-2">
                   <Scissors className="h-4 w-4" />
                   {t("admin.myConfig")}
+                </TabsTrigger>
+                <TabsTrigger value="blocked-times" className="flex items-center gap-2">
+                  <CalendarOff className="h-4 w-4" />
+                  Blocări timp
+                </TabsTrigger>
+                <TabsTrigger value="vacations" className="flex items-center gap-2">
+                  <Palmtree className="h-4 w-4" />
+                  Vacanțe
                 </TabsTrigger>
                 <TabsTrigger value="reviews" className="flex items-center gap-2">
                   <MessageSquare className="h-4 w-4" />
@@ -575,7 +550,7 @@ export default function AdminPage() {
                         <Button
                           variant="default"
                           size="sm"
-                          onClick={() => setBookDialogOpen(true)}
+                          onClick={() => openQuickBook({ date: currentDate })}
                         >
                           <Calendar className="h-4 w-4" />
                           {t("admin.newAppointment")}
@@ -605,8 +580,6 @@ export default function AdminPage() {
                         setCurrentDate(
                           viewMode === "month"
                             ? subMonths(currentDate, 1)
-                            : viewMode === "week"
-                            ? addDays(currentDate, -7)
                             : addDays(currentDate, -1)
                         )
                       }
@@ -615,10 +588,8 @@ export default function AdminPage() {
                     </Button>
                     <h2 className="text-xl font-semibold min-w-[200px] text-center">
                       {viewMode === "month"
-                        ? format(currentDate, "MMMM yyyy")
-                        : viewMode === "week"
-                        ? `Week of ${format(startOfWeek(currentDate), "MMM d")}`
-                        : format(currentDate, "EEEE, MMMM d, yyyy")}
+                        ? capitalizeFirst(format(currentDate, "MMMM yyyy", { locale: ro }))
+                        : capitalizeFirst(format(currentDate, "EEEE, d MMMM yyyy", { locale: ro }))}
                     </h2>
                     <Button
                       variant="ghost"
@@ -627,8 +598,6 @@ export default function AdminPage() {
                         setCurrentDate(
                           viewMode === "month"
                             ? addMonths(currentDate, 1)
-                            : viewMode === "week"
-                            ? addDays(currentDate, 7)
                             : addDays(currentDate, 1)
                         )
                       }
@@ -639,18 +608,18 @@ export default function AdminPage() {
 
                   <div className="flex items-center gap-2">
                     <Button
-                      variant={viewMode === "month" ? "secondary" : "ghost"}
-                      size="sm"
-                      onClick={() => setViewMode("month")}
-                    >
-                      {t("admin.month")}
-                    </Button>
-                    <Button
                       variant={viewMode === "day" ? "secondary" : "ghost"}
                       size="sm"
                       onClick={() => setViewMode("day")}
                     >
                       {t("admin.day")}
+                    </Button>
+                    <Button
+                      variant={viewMode === "month" ? "secondary" : "ghost"}
+                      size="sm"
+                      onClick={() => setViewMode("month")}
+                    >
+                      {t("admin.month")}
                     </Button>
                     <Button
                       variant="outline"
@@ -665,11 +634,13 @@ export default function AdminPage() {
             </Card>
 
             {/* Calendar View */}
-            <Card variant="elevated">
-              <CardContent className="p-6">
-                {viewMode === "month" ? renderMonthView() : renderDayView()}
-              </CardContent>
-            </Card>
+            {viewMode === "month" ? (
+              <Card variant="elevated">
+                <CardContent className="p-6">{renderMonthView()}</CardContent>
+              </Card>
+            ) : (
+              renderSplitDayView()
+            )}
           </TabsContent>
 
           {/* Specialists Tab */}
@@ -680,6 +651,96 @@ export default function AdminPage() {
           {/* Work Hours Tab - Salon Schedule */}
           <TabsContent value="work-hours">
             <WorkHoursManager />
+          </TabsContent>
+
+          {/* Blocked Times Tab */}
+          <TabsContent value="blocked-times">
+            <Card variant="elevated">
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <CalendarOff className="h-5 w-5 text-purple" />
+                    Blocări timp — Blocaj orar
+                  </CardTitle>
+                  <CardDescription>
+                    Selectează o zi din calendar și blochează intervale orare (format 24h)
+                  </CardDescription>
+                </div>
+                {isAdmin && specialists.length > 0 && (
+                  <Select
+                    value={selectedBlockSpecialistId || specialists[0].id}
+                    onValueChange={setSelectedBlockSpecialistId}
+                  >
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder="Selectează specialist" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {specialists.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </CardHeader>
+              <CardContent>
+                {(isSpecialist && !isAdmin ? specialistId : selectedBlockSpecialistId) ? (
+                  <BlockedTimesCalendar
+                    specialistId={(isSpecialist && !isAdmin ? specialistId : selectedBlockSpecialistId)!}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-6">
+                    Niciun specialist selectat.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Vacations Tab */}
+          <TabsContent value="vacations">
+            <Card variant="elevated">
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Palmtree className="h-5 w-5 text-purple" />
+                    Vacanțe și zile libere
+                  </CardTitle>
+                  <CardDescription>
+                    Gestionează perioadele de concediu și zilele libere ale specialistului
+                  </CardDescription>
+                </div>
+                {isAdmin && specialists.length > 0 && (
+                  <Select
+                    value={selectedBlockSpecialistId || specialists[0].id}
+                    onValueChange={setSelectedBlockSpecialistId}
+                  >
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder="Selectează specialist" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {specialists.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </CardHeader>
+              <CardContent>
+                {(isSpecialist && !isAdmin ? specialistId : selectedBlockSpecialistId) ? (
+                  <VacationsManager
+                    specialistId={(isSpecialist && !isAdmin ? specialistId : selectedBlockSpecialistId)!}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-6">
+                    Niciun specialist selectat.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Reviews Tab */}
@@ -725,6 +786,11 @@ export default function AdminPage() {
                     <p className="text-sm text-muted-foreground">
                       {selectedAppointment.services.duration_minutes} {t("admin.minutes")} • {Number(selectedAppointment.services.price)} RON
                     </p>
+                    {selectedAppointment.specialist_id && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Specialist: {specialists.find((s) => s.id === selectedAppointment.specialist_id)?.name || "—"}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -734,11 +800,11 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <p className="font-semibold">
-                      {format(parseISO(selectedAppointment.start_time), "MMMM d, yyyy")}
+                      {capitalizeFirst(format(parseISO(selectedAppointment.start_time), "d MMMM yyyy", { locale: ro }))}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {format(parseISO(selectedAppointment.start_time), "h:mm a")} -{" "}
-                      {format(parseISO(selectedAppointment.end_time), "h:mm a")}
+                      {format(parseISO(selectedAppointment.start_time), "HH:mm")} -{" "}
+                      {format(parseISO(selectedAppointment.end_time), "HH:mm")}
                     </p>
                   </div>
                 </div>
@@ -754,7 +820,11 @@ export default function AdminPage() {
                         : "bg-gray-100 text-gray-700"
                     )}
                   >
-                    {selectedAppointment.status}
+                    {selectedAppointment.status === "confirmed"
+                      ? "Confirmată"
+                      : selectedAppointment.status === "cancelled"
+                      ? "Anulată"
+                      : selectedAppointment.status}
                   </span>
 
                   {selectedAppointment.status === "confirmed" && (
@@ -769,7 +839,7 @@ export default function AdminPage() {
                       ) : (
                         <>
                           <X className="h-4 w-4" />
-                          Cancel
+                          Anulează
                         </>
                       )}
                     </Button>
@@ -780,7 +850,16 @@ export default function AdminPage() {
           </Dialog>
         )}
 
-        <AdminBookAppointment open={bookDialogOpen} onOpenChange={setBookDialogOpen} />
+        <AdminBookAppointment
+          open={bookDialogOpen}
+          onOpenChange={(open) => {
+            setBookDialogOpen(open);
+            if (!open) setBookDefaults({});
+          }}
+          defaultSpecialistId={bookDefaults.specialistId}
+          defaultDate={bookDefaults.date}
+          defaultTime={bookDefaults.time}
+        />
       </main>
     </div>
   );

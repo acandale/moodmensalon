@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Star } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,7 @@ import {
   SalonReview,
   useUpsertReview,
 } from "@/hooks/useReviews";
-import { cn } from "@/lib/utils";
+import { StarRating } from "@/components/reviews/StarRating";
 
 export interface ReviewTargetAppointment {
   id: string;
@@ -30,6 +30,7 @@ export interface ReviewTargetAppointment {
   specialistName?: string | null;
   dateLabel: string;
   existingReview?: SalonReview | null;
+  initialRating?: number;
 }
 
 interface ReviewDialogProps {
@@ -50,7 +51,6 @@ export function ReviewDialog({
   const upsertMutation = useUpsertReview();
 
   const [rating, setRating] = useState(5);
-  const [hoveredRating, setHoveredRating] = useState<number | null>(null);
   const [authorName, setAuthorName] = useState("");
   const [comment, setComment] = useState("");
 
@@ -61,11 +61,15 @@ export function ReviewDialog({
       setAuthorName(appointment.existingReview.author_name);
       setComment(appointment.existingReview.comment || "");
     } else {
-      setRating(5);
+      const nextInitial = appointment?.initialRating;
+      setRating(
+        typeof nextInitial === "number" && nextInitial >= 1 && nextInitial <= 5
+          ? Math.round(nextInitial)
+          : 5
+      );
       setAuthorName(formatReviewerShortName(profile?.full_name || user?.email));
       setComment("");
     }
-    setHoveredRating(null);
   }, [open, appointment, profile?.full_name, user?.email]);
 
   const handleSubmit = async () => {
@@ -118,8 +122,6 @@ export function ReviewDialog({
     }
   };
 
-  const activeStars = hoveredRating ?? rating;
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -143,33 +145,22 @@ export function ReviewDialog({
         </DialogHeader>
 
         <div className="space-y-5 py-2">
-          {/* Star selector */}
-          <div className="space-y-2">
-            <Label>{isRo ? "Evaluare" : "Rating"}</Label>
-            <div className="flex items-center gap-2">
-              {[1, 2, 3, 4, 5].map((starValue) => (
-                <button
-                  key={starValue}
-                  type="button"
-                  onMouseEnter={() => setHoveredRating(starValue)}
-                  onMouseLeave={() => setHoveredRating(null)}
-                  onClick={() => setRating(starValue)}
-                  aria-label={`${starValue} / 5`}
-                  className="p-1 transition-transform hover:scale-110"
-                >
-                  <Star
-                    className={cn(
-                      "h-7 w-7 transition-colors",
-                      starValue <= activeStars
-                        ? "text-amber-400 fill-amber-400"
-                        : "text-muted-foreground/30"
-                    )}
-                  />
-                </button>
-              ))}
-              <span className="ml-2 text-sm font-semibold text-foreground">
-                {activeStars} {isRo ? "din" : "of"} 5
+          {/* Interactive 5-Star Visual Rating */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <Label>{isRo ? "Evaluare (1–5 stele)" : "Rating (1–5 stars)"}</Label>
+              <span className="text-xs text-muted-foreground">
+                {isRo ? "Apasă pe o stea" : "Click a star"}
               </span>
+            </div>
+            <div className="rounded-xl border border-amber-400/25 bg-muted/40 p-3.5 flex items-center justify-between gap-3">
+              <StarRating
+                value={rating}
+                onChange={setRating}
+                size="lg"
+                showScore
+                showDescriptor
+              />
             </div>
           </div>
 
