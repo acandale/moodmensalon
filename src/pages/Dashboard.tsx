@@ -6,6 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Navbar } from "@/components/layout/Navbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { BarChart3, Calendar, CalendarOff, Clock, Scissors, Plus, Loader2, Star, Pencil, User, Settings, MessageSquare, FileText, Palmtree, KeyRound, Phone, MessageCircle } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -72,6 +73,7 @@ export default function Dashboard() {
   const ro = language === "ro";
   const queryClient = useQueryClient();
   const [bookDialogOpen, setBookDialogOpen] = useState(false);
+  const [allowClientTestBooking, setAllowClientTestBooking] = useState(false);
   const [reviewTarget, setReviewTarget] = useState<ReviewTargetAppointment | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
 
@@ -234,19 +236,75 @@ export default function Dashboard() {
   const nextTelHref = nextClientPhone ? buildTelHref(nextClientPhone) : null;
   const nextWhatsAppHref = nextClientPhone ? buildWhatsAppHref(nextClientPhone) : null;
 
+  const isClientOnly = !isAdmin && !isSpecialist;
+
+  const isAppointmentInPast = (startTimeIso: string) =>
+    parseISO(startTimeIso).getTime() <= Date.now();
+
+  const showPastCancelError = () => {
+    toast({
+      title: t("dashboard.cannotCancelPast"),
+      description: t("dashboard.cannotCancelPastDesc"),
+      variant: "destructive",
+    });
+    setNowTick(Date.now());
+    void refetch();
+  };
+
+  const requestCancelAppointment = (apt: Appointment) => {
+    if (isClientOnly && isAppointmentInPast(apt.start_time)) {
+      showPastCancelError();
+      return;
+    }
+    setConfirmCancelId(apt.id);
+  };
+
   const handleCancelAppointment = async (appointmentId: string) => {
-    const { data, error } = await supabase
+    const targetApt = appointments.find((a) => a.id === appointmentId);
+    if (isClientOnly && targetApt && isAppointmentInPast(targetApt.start_time)) {
+      showPastCancelError();
+      return;
+    }
+
+    let updateQuery = supabase
       .from("appointments")
       .update({ status: "cancelled" })
-      .eq("id", appointmentId)
-      .select("id");
+      .eq("id", appointmentId);
+
+    if (isClientOnly && user?.id) {
+      updateQuery = updateQuery
+        .eq("user_id", user.id)
+        .gt("start_time", new Date().toISOString());
+    }
+
+    const { data, error } = await updateQuery.select("id");
 
     if (error || !data || data.length === 0) {
-      toast({
-        title: t("dashboard.error"),
-        description: t("dashboard.cancelFailed"),
-        variant: "destructive",
-      });
+      const errorMsg = (error?.message || "").toLowerCase();
+      let isPastBlocked =
+        errorMsg.includes("nu mai poate fi anulată") ||
+        (isClientOnly && !!targetApt && isAppointmentInPast(targetApt.start_time));
+
+      if (!isPastBlocked && isClientOnly) {
+        const { data: latestApt } = await supabase
+          .from("appointments")
+          .select("start_time")
+          .eq("id", appointmentId)
+          .maybeSingle();
+        if (latestApt?.start_time && isAppointmentInPast(latestApt.start_time)) {
+          isPastBlocked = true;
+        }
+      }
+
+      if (isPastBlocked) {
+        showPastCancelError();
+      } else {
+        toast({
+          title: t("dashboard.error"),
+          description: t("dashboard.cancelFailed"),
+          variant: "destructive",
+        });
+      }
     } else {
       toast({
         title: t("dashboard.cancelled"),
@@ -566,7 +624,7 @@ export default function Dashboard() {
                     <Button
                       variant="hero-outline"
                       size="sm"
-                      onClick={() => setConfirmCancelId(nextAppointment.id)}
+                      onClick={() => requestCancelAppointment(nextAppointment)}
                     >
                       {t("dashboard.cancelAppointment")}
                     </Button>
@@ -597,14 +655,42 @@ export default function Dashboard() {
               <CardTitle>{t("dashboard.quickActions")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button
-                variant="hero"
-                className="w-full justify-start"
-                onClick={() => (isSpecialist && !isAdmin ? setBookDialogOpen(true) : navigate("/book"))}
-              >
-                <Plus className="h-4 w-4" />
-                {t("dashboard.bookNew")}
-              </Button>
+              {isAdmin || isSpecialist ? (
+                <div className="space-y-2.5">
+                  <Button
+                    variant="hero"
+                    className="w-full justify-start"
+                    disabled={!allowClientTestBooking}
+                    onClick={() => navigate("/book")}
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span className="truncate">
+                      {t("dashboard.bookNew")} {ro ? "(în mod client!)" : "(client mode!)"}
+                    </span>
+                  </Button>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none px-1">
+                    <Checkbox
+                      checked={allowClientTestBooking}
+                      onCheckedChange={(checked) => setAllowClientTestBooking(!!checked)}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span>
+                      {ro
+                        ? "Activează mod client (doar pentru test)"
+                        : "Enable client mode (test only)"}
+                    </span>
+                  </label>
+                </div>
+              ) : (
+                <Button
+                  variant="hero"
+                  className="w-full justify-start"
+                  onClick={() => navigate("/book")}
+                >
+                  <Plus className="h-4 w-4" />
+                  {t("dashboard.bookNew")}
+                </Button>
+              )}
               {!isAdmin && !isSpecialist && (
                 <>
                   <Button
@@ -694,7 +780,7 @@ export default function Dashboard() {
                         variant="ghost"
                         size="sm"
                         className="text-destructive hover:text-destructive"
-                        onClick={() => setConfirmCancelId(apt.id)}
+                        onClick={() => requestCancelAppointment(apt)}
                       >
                         {t("dashboard.cancel")}
                       </Button>

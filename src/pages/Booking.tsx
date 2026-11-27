@@ -224,12 +224,52 @@ export default function BookingPage() {
       const [hours, minutes] = selectedTime.split(":").map(Number);
       const startTime = new Date(selectedDate); startTime.setHours(hours, minutes, 0, 0);
       const endTime = addMinutes(startTime, selectedService.duration_minutes);
+      const startIso = startTime.toISOString();
+      const endIso = endTime.toISOString();
+      const dateStr = format(startTime, "yyyy-MM-dd");
+
+      const [aptRes, btRes, bdRes] = await Promise.all([
+        supabase
+          .from("appointments")
+          .select("id")
+          .eq("specialist_id", selectedSpecialist.id)
+          .neq("status", "cancelled")
+          .lt("start_time", endIso)
+          .gt("end_time", startIso)
+          .limit(1),
+        supabase
+          .from("blocked_times")
+          .select("id")
+          .eq("specialist_id", selectedSpecialist.id)
+          .lt("start_time", endIso)
+          .gt("end_time", startIso)
+          .limit(1),
+        supabase
+          .from("blocked_days")
+          .select("id")
+          .eq("specialist_id", selectedSpecialist.id)
+          .lte("start_date", dateStr)
+          .gte("end_date", dateStr)
+          .limit(1),
+      ]);
+      if (aptRes.error) throw aptRes.error;
+      if (btRes.error) throw btRes.error;
+      if (bdRes.error) throw bdRes.error;
+
+      if (
+        (aptRes.data && aptRes.data.length > 0) ||
+        (btRes.data && btRes.data.length > 0) ||
+        (bdRes.data && bdRes.data.length > 0)
+      ) {
+        throw new Error("overlap");
+      }
+
       const { error } = await supabase.from("appointments").insert({
         user_id: user.id,
         service_id: selectedService.id,
         specialist_id: selectedSpecialist.id,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
+        start_time: startIso,
+        end_time: endIso,
         status: "confirmed",
       });
       if (error) throw error;

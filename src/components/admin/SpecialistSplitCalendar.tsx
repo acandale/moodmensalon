@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   addDays,
   eachDayOfInterval,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -99,7 +100,7 @@ interface SpecialistSplitCalendarProps {
   onOpenBlockedTimes?: (specialistId: string) => void;
 }
 
-const SLOT_HEIGHT = 22; // 22px per 15 min => 88px per hour
+const SLOT_HEIGHT = 30; // 30px per 15 min => 120px per hour (2px per minute)
 const WEEKDAY_INITIALS = ["L", "M", "M", "J", "V", "S", "D"];
 
 const AVATAR_TONES = [
@@ -219,6 +220,27 @@ export function SpecialistSplitCalendar({
   onQuickBook,
   onOpenBlockedTimes,
 }: SpecialistSplitCalendarProps) {
+  const [hideCancelledBySpecialist, setHideCancelledBySpecialist] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem("admin-hide-cancelled-by-specialist");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const toggleHideCancelled = (specId: string, hide: boolean) => {
+    setHideCancelledBySpecialist((prev) => {
+      const next = { ...prev, [specId]: hide };
+      try {
+        localStorage.setItem("admin-hide-cancelled-by-specialist", JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+  };
+
   const canManageSpecialist = (specId: string) =>
     isAdmin || (!!currentSpecialistId && specId === currentSpecialistId);
   const weekStart = useMemo(
@@ -300,11 +322,17 @@ export function SpecialistSplitCalendar({
         ? `${workStartStr} - ${workEndStr}`
         : "Liber";
 
-      const colAppointments = isUnassigned
+      const rawColAppointments = isUnassigned
         ? dayAppointments.filter(
             (apt) => !apt.specialist_id || !specialists.some((s) => s.id === apt.specialist_id)
           )
         : dayAppointments.filter((apt) => apt.specialist_id === spec.id);
+
+      const cancelledCount = rawColAppointments.filter((apt) => apt.status === "cancelled").length;
+      const hideCancelled = !isUnassigned && !!hideCancelledBySpecialist[spec.id];
+      const colAppointments = hideCancelled
+        ? rawColAppointments.filter((apt) => apt.status !== "cancelled")
+        : rawColAppointments;
 
       const colBlockedTimes = isUnassigned
         ? []
@@ -318,6 +346,8 @@ export function SpecialistSplitCalendar({
         workStartMinutes: isWorking ? toMinutes(workStartStr) : 0,
         workEndMinutes: isWorking ? toMinutes(workEndStr) : 0,
         subtitle,
+        cancelledCount,
+        hideCancelled,
         appointments: layoutColumnAppointments(colAppointments),
         blockedTimes: colBlockedTimes,
       };
@@ -332,6 +362,7 @@ export function SpecialistSplitCalendar({
     dayAppointments,
     specialists,
     blockedTimes,
+    hideCancelledBySpecialist,
   ]);
 
   // Calculate unified vertical hour range for all columns
@@ -498,84 +529,107 @@ export function SpecialistSplitCalendar({
                   return (
                     <div
                       key={col.specialist.id}
-                      className="min-w-[175px] sm:min-w-[220px] flex-1 border-l border-border px-3 py-2.5 flex items-center justify-between gap-2"
+                      className="min-w-[175px] sm:min-w-[220px] flex-1 border-l border-border px-3 py-2.5 flex flex-col justify-between gap-2"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div
-                          className={cn(
-                            "w-9 h-9 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ring-1",
-                            avatarTone
-                          )}
-                        >
-                          {getInitials(col.specialist.name)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-foreground truncate">
-                            {col.specialist.name}
-                          </p>
-                          <p
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div
                             className={cn(
-                              "text-xs tabular-nums truncate",
-                              col.vacation
-                                ? "text-amber-600 dark:text-amber-400 font-medium"
-                                : col.isWorking
-                                ? "text-muted-foreground"
-                                : "text-muted-foreground/70 italic"
+                              "w-9 h-9 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ring-1",
+                              avatarTone
                             )}
                           >
-                            {col.subtitle}
-                          </p>
+                            {getInitials(col.specialist.name)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">
+                              {col.specialist.name}
+                            </p>
+                            <p
+                              className={cn(
+                                "text-xs tabular-nums truncate",
+                                col.vacation
+                                  ? "text-amber-600 dark:text-amber-400 font-medium"
+                                  : col.isWorking
+                                  ? "text-muted-foreground"
+                                  : "text-muted-foreground/70 italic"
+                              )}
+                            >
+                              {col.subtitle}
+                            </p>
+                          </div>
                         </div>
+
+                        {!col.isUnassigned && (canManageSpecialist(col.specialist.id) || !!onSelectSpecialistFilter) && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                                aria-label={`Opțiuni ${col.specialist.name}`}
+                              >
+                                <ChevronDown className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {canManageSpecialist(col.specialist.id) && (
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    onQuickBook({
+                                      specialistId: col.specialist.id,
+                                      date: currentDate,
+                                    })
+                                  }
+                                >
+                                  <Plus className="h-4 w-4 mr-2" />
+                                  Programează la {col.specialist.name}
+                                </DropdownMenuItem>
+                              )}
+                              {onSelectSpecialistFilter && (
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    onSelectSpecialistFilter(isFocused ? null : col.specialist.id)
+                                  }
+                                >
+                                  <CalendarIcon className="h-4 w-4 mr-2" />
+                                  {isFocused
+                                    ? "Arată toți specialiștii"
+                                    : `Filtrează doar ${col.specialist.name}`}
+                                </DropdownMenuItem>
+                              )}
+                              {canManageSpecialist(col.specialist.id) && onOpenBlockedTimes && (
+                                <DropdownMenuItem
+                                  onClick={() => onOpenBlockedTimes(col.specialist.id)}
+                                >
+                                  <CalendarOff className="h-4 w-4 mr-2" />
+                                  Blochează orar
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                       </div>
 
-                      {!col.isUnassigned && (canManageSpecialist(col.specialist.id) || !!onSelectSpecialistFilter) && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-                              aria-label={`Opțiuni ${col.specialist.name}`}
+                      {!col.isUnassigned && (
+                        <label className="pt-1.5 border-t border-border/50 flex items-center gap-2 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer select-none">
+                          <Checkbox
+                            checked={col.hideCancelled}
+                            onCheckedChange={(checked) =>
+                              toggleHideCancelled(col.specialist.id, !!checked)
+                            }
+                            className="h-3.5 w-3.5"
+                          />
+                          <span className="truncate">Ascunde anulate</span>
+                          {col.cancelledCount > 0 && (
+                            <span
+                              title={`${col.cancelledCount} programări anulate`}
+                              className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground tabular-nums shrink-0"
                             >
-                              <ChevronDown className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            {canManageSpecialist(col.specialist.id) && (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  onQuickBook({
-                                    specialistId: col.specialist.id,
-                                    date: currentDate,
-                                  })
-                                }
-                              >
-                                <Plus className="h-4 w-4 mr-2" />
-                                Programează la {col.specialist.name}
-                              </DropdownMenuItem>
-                            )}
-                            {onSelectSpecialistFilter && (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  onSelectSpecialistFilter(isFocused ? null : col.specialist.id)
-                                }
-                              >
-                                <CalendarIcon className="h-4 w-4 mr-2" />
-                                {isFocused
-                                  ? "Arată toți specialiștii"
-                                  : `Filtrează doar ${col.specialist.name}`}
-                              </DropdownMenuItem>
-                            )}
-                            {canManageSpecialist(col.specialist.id) && onOpenBlockedTimes && (
-                              <DropdownMenuItem
-                                onClick={() => onOpenBlockedTimes(col.specialist.id)}
-                              >
-                                <CalendarOff className="h-4 w-4 mr-2" />
-                                Blochează orar
-                              </DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                              {col.cancelledCount}
+                            </span>
+                          )}
+                        </label>
                       )}
                     </div>
                   );
@@ -719,10 +773,10 @@ export function SpecialistSplitCalendar({
                     {/* Appointments inside this Specialist's column */}
                     {col.appointments.map(({ appointment: apt, startMinutes, endMinutes, lane, laneCount }) => {
                       const clampedStart = Math.max(startMinutesOfGrid, startMinutes);
-                      const clampedEnd = Math.min(endHour * 60, Math.max(clampedStart + 15, endMinutes));
+                      const clampedEnd = Math.min(endHour * 60, Math.max(clampedStart + 12, endMinutes));
                       const top = ((clampedStart - startMinutesOfGrid) / 15) * SLOT_HEIGHT + 1;
                       const height = Math.max(
-                        38,
+                        22,
                         ((clampedEnd - clampedStart) / 15) * SLOT_HEIGHT - 2
                       );
 
@@ -733,6 +787,8 @@ export function SpecialistSplitCalendar({
                           getColorIndex(apt.services?.name || apt.id, CARD_PALETTES.length)
                         ];
                       const clientName = apt.profiles?.full_name || "Client necunoscut";
+                      const isUltraCompact = height < 34;
+                      const isCompact = height < 46;
 
                       return (
                         <button
@@ -749,22 +805,34 @@ export function SpecialistSplitCalendar({
                             width: `calc(${widthPct}% - 6px)`,
                           }}
                           className={cn(
-                            "absolute z-10 rounded-md border px-2 py-1 text-left overflow-hidden shadow-xs transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple",
+                            "absolute z-10 rounded-md border px-2 text-left overflow-hidden shadow-xs transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple",
+                            isCompact ? "py-0.5 flex flex-col justify-center" : "py-1",
                             palette,
                             apt.status === "cancelled" && "opacity-50 line-through"
                           )}
                         >
-                          <div className="text-[11px] font-medium tabular-nums leading-tight opacity-80 truncate">
-                            {format(parseISO(apt.start_time), "HH:mm")} -{" "}
-                            {format(parseISO(apt.end_time), "HH:mm")}
-                          </div>
-                          <div className="text-xs sm:text-[13px] font-semibold leading-tight truncate mt-0.5">
-                            {clientName}
-                          </div>
-                          {height >= 54 && (
-                            <div className="text-[11px] leading-snug opacity-85 line-clamp-2 mt-0.5">
-                              {apt.services?.name}
+                          {isUltraCompact ? (
+                            <div className="flex items-center gap-1.5 text-[11px] leading-none truncate">
+                              <span className="font-medium tabular-nums opacity-80 shrink-0">
+                                {format(parseISO(apt.start_time), "HH:mm")}–{format(parseISO(apt.end_time), "HH:mm")}
+                              </span>
+                              <span className="font-semibold truncate">{clientName}</span>
                             </div>
+                          ) : (
+                            <>
+                              <div className="text-[11px] font-medium tabular-nums leading-[14px] opacity-80 truncate">
+                                {format(parseISO(apt.start_time), "HH:mm")} -{" "}
+                                {format(parseISO(apt.end_time), "HH:mm")}
+                              </div>
+                              <div className="text-xs sm:text-[13px] font-semibold leading-[15px] truncate mt-0.5">
+                                {clientName}
+                              </div>
+                              {height >= 58 && (
+                                <div className="text-[11px] leading-snug opacity-85 line-clamp-2 mt-0.5">
+                                  {apt.services?.name}
+                                </div>
+                              )}
+                            </>
                           )}
                         </button>
                       );

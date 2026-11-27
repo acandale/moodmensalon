@@ -67,6 +67,8 @@ const translations: Record<Language, Record<string, string>> = {
     "dashboard.client": "Client",
     "dashboard.error": "Error",
     "dashboard.cancelFailed": "Failed to cancel appointment",
+    "dashboard.cannotCancelPast": "This appointment can no longer be cancelled",
+    "dashboard.cannotCancelPastDesc": "Past or already started appointments cannot be cancelled.",
     "dashboard.cancelled": "Appointment cancelled",
     "dashboard.cancelledDesc": "Your appointment has been cancelled successfully",
 
@@ -394,6 +396,8 @@ const translations: Record<Language, Record<string, string>> = {
     "dashboard.client": "Client",
     "dashboard.error": "Eroare",
     "dashboard.cancelFailed": "Anularea programării a eșuat",
+    "dashboard.cannotCancelPast": "Această programare nu mai poate fi anulată",
+    "dashboard.cannotCancelPastDesc": "Programările din trecut sau care au început deja nu mai pot fi anulate.",
     "dashboard.cancelled": "Programare anulată",
     "dashboard.cancelledDesc": "Programarea ta a fost anulată cu succes",
 

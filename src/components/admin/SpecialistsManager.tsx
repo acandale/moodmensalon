@@ -226,16 +226,42 @@ export function SpecialistsManager({ restrictToSpecialistId }: SpecialistsManage
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      const target = specialists.find((s) => s.id === id);
+
+      // Unlink appointments referencing this specialist first so the FK constraint
+      // (appointments.specialist_id -> specialists.id) does not block deletion.
+      const { error: unlinkErr } = await supabase
+        .from("appointments")
+        .update({ specialist_id: null })
+        .eq("specialist_id", id);
+      if (unlinkErr) throw unlinkErr;
+
       const { error } = await supabase.from("specialists").delete().eq("id", id);
       if (error) throw error;
+
+      if (target?.user_id) {
+        await supabase
+          .from("user_roles")
+          .update({ role: "client" as const })
+          .eq("user_id", target.user_id);
+      }
     },
     onSuccess: () => {
       toast({ title: "Specialist șters" });
       if (selectedSpecialistId === deleteId) setSelectedSpecialistId(null);
       queryClient.invalidateQueries({ queryKey: ["admin-specialists"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-specialists-all"] });
+      queryClient.invalidateQueries({ queryKey: ["booking-specialists-all"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments-for-date"] });
       setDeleteId(null);
     },
-    onError: () => toast({ title: "Ștergerea a eșuat", variant: "destructive" }),
+    onError: (err: unknown) =>
+      toast({
+        title: "Ștergerea a eșuat",
+        description: err instanceof Error ? err.message : undefined,
+        variant: "destructive",
+      }),
   });
 
   // Service CRUD now uses specialist_id directly on the services table

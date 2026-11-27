@@ -18,6 +18,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO, isBefore, isSameDay } from "date-fns";
 import { ro } from "date-fns/locale";
@@ -47,6 +57,7 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
     endDate: Date | undefined;
     reason: string;
   }>({ startDate: undefined, endDate: undefined, reason: "" });
+  const [vacationToDelete, setVacationToDelete] = useState<BlockedDay | null>(null);
 
   const { data: blockedDays = [], isLoading } = useQuery({
     queryKey: ["specialist-blocked-days", specialistId],
@@ -78,6 +89,7 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
       setFormData({ startDate: undefined, endDate: undefined, reason: "" });
       queryClient.invalidateQueries({ queryKey: ["specialist-blocked-days", specialistId] });
       queryClient.invalidateQueries({ queryKey: ["blocked-days-booking"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-day-blocked-days"] });
     },
     onError: () => {
       toast({ title: "Eroare la adăugare", variant: "destructive" });
@@ -91,8 +103,10 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
     },
     onSuccess: () => {
       toast({ title: "Vacanță eliminată" });
+      setVacationToDelete(null);
       queryClient.invalidateQueries({ queryKey: ["specialist-blocked-days", specialistId] });
       queryClient.invalidateQueries({ queryKey: ["blocked-days-booking"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-day-blocked-days"] });
     },
     onError: () => {
       toast({ title: "Eroare la eliminare", variant: "destructive" });
@@ -253,7 +267,14 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
                   </p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => deleteMutation.mutate(bd.id)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-red-600"
+                title="Șterge vacanța"
+                onClick={() => setVacationToDelete(bd)}
+              >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -283,13 +304,71 @@ export function VacationsManager({ specialistId }: VacationsManagerProps) {
                   </p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => deleteMutation.mutate(bd.id)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-red-600"
+                title="Șterge vacanța"
+                onClick={() => setVacationToDelete(bd)}
+              >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
           ))}
         </div>
       )}
+
+      <AlertDialog
+        open={!!vacationToDelete}
+        onOpenChange={(open) => {
+          if (!open && !deleteMutation.isPending) {
+            setVacationToDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ștergi această vacanță?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {vacationToDelete && (
+                <>
+                  Perioada{" "}
+                  <strong className="text-foreground">
+                    {format(parseISO(vacationToDelete.start_date), "d MMM yyyy", { locale: ro })} –{" "}
+                    {format(parseISO(vacationToDelete.end_date), "d MMM yyyy", { locale: ro })}
+                  </strong>{" "}
+                  ({getDayCount(vacationToDelete.start_date, vacationToDelete.end_date)}{" "}
+                  {getDayCount(vacationToDelete.start_date, vacationToDelete.end_date) > 1
+                    ? "zile"
+                    : "zi"}
+                  {vacationToDelete.reason ? ` • ${vacationToDelete.reason}` : ""}) va fi eliminată
+                  din calendar.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>
+              Renunță
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!vacationToDelete) return;
+                deleteMutation.mutate(vacationToDelete.id);
+              }}
+            >
+              {deleteMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+              ) : null}
+              Da, șterge vacanța
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
