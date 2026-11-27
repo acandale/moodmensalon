@@ -44,9 +44,18 @@ function markDeliveredPushId(id: string) {
 async function getOrRegisterPushServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
   try {
-    const existing = await navigator.serviceWorker.getRegistration("/");
-    if (existing) return existing;
-    return await navigator.serviceWorker.register("/sw-push.js", { scope: "/" });
+    let reg = await navigator.serviceWorker.getRegistration("/");
+    if (!reg) {
+      reg = await navigator.serviceWorker.register("/sw-push.js", { scope: "/" });
+    }
+    if (!reg.active) {
+      await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<void>((resolve) => setTimeout(resolve, 4000)),
+      ]);
+      reg = (await navigator.serviceWorker.getRegistration("/")) || reg;
+    }
+    return reg;
   } catch {
     return null;
   }
@@ -92,11 +101,45 @@ export function usePushNotifications() {
       }
 
       const localPref = localStorage.getItem(`${PUSH_PREF_PREFIX}${user.id}`) === "true";
+      const vapidPublicKey = (import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined)?.trim();
       const reg = await getOrRegisterPushServiceWorker();
       if (reg && "pushManager" in reg) {
         try {
           const existingSub = await reg.pushManager.getSubscription();
           if (existingSub) {
+            let keyMatches = true;
+            if (vapidPublicKey && existingSub.options?.applicationServerKey) {
+              const expectedBytes = urlBase64ToUint8Array(vapidPublicKey);
+              const existingBytes = new Uint8Array(existingSub.options.applicationServerKey);
+              keyMatches =
+                existingBytes.length === expectedBytes.length &&
+                existingBytes.every((b, idx) => b === expectedBytes[idx]);
+            }
+
+            if (!keyMatches) {
+              setIsSubscribed(false);
+              return;
+            }
+
+            if (localPref) {
+              const subJson = existingSub.toJSON();
+              const p256dh = subJson.keys?.p256dh || "";
+              const auth = subJson.keys?.auth || "";
+              if (existingSub.endpoint && p256dh && auth) {
+                await supabase.from("push_subscriptions").upsert(
+                  {
+                    user_id: user.id,
+                    endpoint: existingSub.endpoint,
+                    p256dh,
+                    auth,
+                    user_agent: navigator.userAgent.slice(0, 250),
+                    updated_at: new Date().toISOString(),
+                  },
+                  { onConflict: "endpoint" }
+                );
+              }
+            }
+
             setIsSubscribed(true);
             return;
           }
@@ -173,16 +216,33 @@ export function usePushNotifications() {
       }
 
       const reg = await getOrRegisterPushServiceWorker();
-      const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
+      const vapidPublicKey = (import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined)?.trim();
 
-      if (reg && "pushManager" in reg && vapidPublicKey?.trim()) {
+      if (reg && "pushManager" in reg && vapidPublicKey) {
         try {
+          const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
           let subscription = await reg.pushManager.getSubscription();
           if (!subscription) {
             subscription = await reg.pushManager.subscribe({
               userVisibleOnly: true,
-              applicationServerKey: urlBase64ToUint8Array(vapidPublicKey.trim()),
+              applicationServerKey,
             });
+          } else {
+            // Re-subscribe if existing subscription used a different VAPID key
+            const existingKey = subscription.options?.applicationServerKey;
+            if (existingKey) {
+              const existingBytes = new Uint8Array(existingKey);
+              const matches =
+                existingBytes.length === applicationServerKey.length &&
+                existingBytes.every((b, idx) => b === applicationServerKey[idx]);
+              if (!matches) {
+                await subscription.unsubscribe();
+                subscription = await reg.pushManager.subscribe({
+                  userVisibleOnly: true,
+                  applicationServerKey,
+                });
+              }
+            }
           }
 
           const subJson = subscription.toJSON();
@@ -190,7 +250,7 @@ export function usePushNotifications() {
           const auth = subJson.keys?.auth || "";
 
           if (subscription.endpoint && p256dh && auth) {
-            await supabase.from("push_subscriptions").upsert(
+            const { error: upsertError } = await supabase.from("push_subscriptions").upsert(
               {
                 user_id: user.id,
                 endpoint: subscription.endpoint,
@@ -201,6 +261,9 @@ export function usePushNotifications() {
               },
               { onConflict: "endpoint" }
             );
+            if (upsertError) {
+              console.warn("Failed to persist push subscription:", upsertError.message);
+            }
           }
         } catch (subErr) {
           console.warn("PushManager VAPID subscription skipped:", subErr);
@@ -213,8 +276,8 @@ export function usePushNotifications() {
       await showDeviceNotification(
         isRo ? "Notificări activate!" : "Notifications enabled!",
         isRo
-          ? "Vei primi remindere cu 24h și 3h înainte de fiecare programare."
-          : "You will receive reminders 24h and 3h before each appointment.",
+          ? "Vei primi remindere cu 1 oră înainte de fiecare programare (plus 24h și 3h)."
+          : "You will receive reminders 1h before each appointment (plus 24h and 3h).",
         "push-enabled"
       );
 
@@ -253,14 +316,26 @@ export function usePushNotifications() {
     }
   }, [user?.id]);
 
-  const sendTestPush = useCallback(async () => {
+  const sendTestPush = useCallback(async (): Promise<{ mode: "server" | "local" }> => {
+    try {
+      const { data, error } = await supabase.functions.invoke("send-appointment-reminders", {
+        body: { testPush: true },
+      });
+      if (!error && data && typeof data === "object" && "sent" in data && Number((data as { sent: number }).sent) > 0) {
+        return { mode: "server" };
+      }
+    } catch {
+      // Fallback to local service worker notification if Edge Function isn't reachable
+    }
+
     await showDeviceNotification(
       isRo ? "Reminder test programare" : "Test appointment reminder",
       isRo
-        ? "Notificările pe acest dispozitiv funcționează corect!"
-        : "Notifications on this device are working!",
+        ? "Notificările pe acest dispozitiv funcționează! Vei primi alerte cu 1 oră înainte de programare."
+        : "Notifications on this device are working! You will receive alerts 1 hour before your appointment.",
       `test-${Date.now()}`
     );
+    return { mode: "local" };
   }, [isRo, showDeviceNotification]);
 
   const dispatchDueLocalReminders = useCallback(
@@ -270,7 +345,13 @@ export function usePushNotifications() {
 
       for (const notif of activeNotifications) {
         if (notif.push_sent || notif.is_read) continue;
-        if (notif.type !== "reminder_24h" && notif.type !== "reminder_3h") continue;
+        if (
+          notif.type !== "reminder_1h" &&
+          notif.type !== "reminder_24h" &&
+          notif.type !== "reminder_3h"
+        ) {
+          continue;
+        }
         if (delivered.has(notif.id)) continue;
 
         markDeliveredPushId(notif.id);

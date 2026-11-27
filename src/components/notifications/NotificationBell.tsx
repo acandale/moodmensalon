@@ -76,8 +76,8 @@ export function NotificationBell() {
       toast({
         title: isRo ? "Notificări Push activate" : "Push notifications enabled",
         description: isRo
-          ? "Vei primi alerte cu 24h și 3h înainte de programări."
-          : "You will receive alerts 24h and 3h before appointments.",
+          ? "Vei primi alerte cu 1 oră înainte de programare (plus 3h și 24h)."
+          : "You will receive alerts 1 hour before appointments (plus 3h and 24h).",
       });
     } else if (res.errorMessage) {
       toast({
@@ -107,6 +107,7 @@ export function NotificationBell() {
         return <CalendarCheck className="h-4 w-4 text-emerald-400 shrink-0" />;
       case "appointment_cancelled":
         return <CalendarX className="h-4 w-4 text-red-400 shrink-0" />;
+      case "reminder_1h":
       case "reminder_3h":
         return <Clock className="h-4 w-4 text-amber-400 shrink-0" />;
       case "reminder_24h":
@@ -224,8 +225,8 @@ export function NotificationBell() {
               <p className="text-xs font-medium text-white">
                 {isSubscribed
                   ? isRo
-                    ? "Push pe telefon activ (24h & 3h)"
-                    : "Device push active (24h & 3h)"
+                    ? "Push pe telefon activ (1h, 3h & 24h)"
+                    : "Device push active (1h, 3h & 24h)"
                   : permission === "denied"
                   ? isRo
                     ? "Notificările browser sunt blocate"
@@ -240,8 +241,8 @@ export function NotificationBell() {
                     ? "Vei fi notificat automat înainte de programare"
                     : "Automatic alerts before appointments"
                   : isRo
-                  ? "Alerte cu 24h și 3h înainte de tuns"
-                  : "Alerts 24h & 3h before your booking"}
+                  ? "Alerte cu 1h, 3h și 24h înainte de tuns"
+                  : "Alerts 1h, 3h & 24h before your booking"}
               </p>
             </div>
             {isSubscribed ? (
@@ -334,8 +335,8 @@ export function NotificationBell() {
                 {scheduledReminders.length === 0 ? (
                   <p className="text-center text-xs text-white/50 py-8">
                     {isRo
-                      ? "Nu există remindere programate (24h / 3h înainte)."
-                      : "No scheduled 24h / 3h reminders."}
+                      ? "Nu există remindere programate (1h / 3h / 24h înainte)."
+                      : "No scheduled 1h / 3h / 24h reminders."}
                   </p>
                 ) : (
                   scheduledReminders.map((item) => renderNotificationCard(item, true))

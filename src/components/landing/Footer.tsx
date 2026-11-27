@@ -1,7 +1,7 @@
 import moodLogoSrc from "@/assets/mood_logo.png";
 import { Link } from "react-router-dom";
 import { Scissors, MapPin, Phone, Mail, Clock } from "lucide-react";
-import { useSalonSettings } from "@/hooks/useSalonSettings";
+import { useSalonSettings, DEFAULT_FOOTER_DESCRIPTION } from "@/hooks/useSalonSettings";
 import { useWorkHours } from "@/hooks/useWorkHours";
 import { useLanguage } from "@/hooks/useLanguage";
 
@@ -11,6 +11,10 @@ export function Footer() {
   const { data: workHours = [] } = useWorkHours();
 
   const salonName = settings?.salon_name || "BarberPro";
+  const footerDescription =
+    settings?.footer_description !== undefined
+      ? settings.footer_description
+      : DEFAULT_FOOTER_DESCRIPTION;
   const quickLinks = settings?.quick_links || [
     { label: "Services", href: "/#services" },
     { label: "About Us", href: "/#about" },
@@ -62,11 +66,15 @@ export function Footer() {
           {/* Brand */}
           <div>
             <Link to="/" className="flex items-center gap-2 mb-4">
-<img src={moodLogoSrc} alt="Logo" className="h-10 w-10 rounded-lg object-cover" />
+              <img
+                src={settings?.logo_url || moodLogoSrc}
+                alt="Logo"
+                className="h-10 w-10 rounded-lg object-cover"
+              />
               <span className="font-bold text-xl">{salonName}</span>
             </Link>
             <p className="text-white/60 text-sm leading-relaxed">
-              Premium grooming services for the modern gentleman.
+              {footerDescription}
             </p>
           </div>
 

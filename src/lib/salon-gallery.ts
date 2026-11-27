@@ -118,3 +118,55 @@ export function compressImageFile(
     reader.readAsDataURL(file);
   });
 }
+
+export function compressLogoFile(
+  file: File,
+  maxDimension = 512,
+  quality = 0.9,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Nu s-a putut citi fișierul imagine."));
+    reader.onload = () => {
+      const originalDataUrl = reader.result as string;
+
+      if (file.type === "image/svg+xml" && file.size <= 150_000) {
+        resolve(originalDataUrl);
+        return;
+      }
+
+      const img = new Image();
+      img.onerror = () => reject(new Error("Fișierul selectat nu este o imagine validă."));
+      img.onload = () => {
+        if (file.size <= 150_000 && img.width <= maxDimension && img.height <= maxDimension) {
+          resolve(originalDataUrl);
+          return;
+        }
+
+        const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Nu s-a putut procesa imaginea."));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const webpData = canvas.toDataURL("image/webp", quality);
+        resolve(
+          webpData.startsWith("data:image/webp")
+            ? webpData
+            : canvas.toDataURL("image/png"),
+        );
+      };
+      img.src = originalDataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}

@@ -15,10 +15,12 @@ const COMMENT_TRUNCATE_LIMIT = 155;
 function ReviewCardItem({
   review,
   salonName,
+  logoSrc,
   isRo,
 }: {
   review: SalonReview;
   salonName: string;
+  logoSrc: string;
   isRo: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -80,7 +82,7 @@ function ReviewCardItem({
             {review.salon_reply && (
               <div className="mt-4 pt-3.5 border-t border-border/70 flex items-start gap-3">
                 <img
-                  src={moodLogoSrc}
+                  src={logoSrc}
                   alt={salonName}
                   className="h-9 w-9 rounded-full object-cover shrink-0 border border-border"
                 />
@@ -117,6 +119,7 @@ export function ReviewsSection() {
       ? (reviews.reduce((sum, r) => sum + r.rating, 0) / totalCount).toFixed(2)
       : "5.00";
   const salonName = settings?.salon_name || "MOOD MEN SALON";
+  const logoSrc = settings?.logo_url || moodLogoSrc;
 
   const visibleReviews = reviews.slice(0, visibleCount);
   const hasMore = visibleCount < totalCount;
@@ -186,6 +189,7 @@ export function ReviewsSection() {
                     key={review.id}
                     review={review}
                     salonName={salonName}
+                    logoSrc={logoSrc}
                     isRo={isRo}
                   />
                 ))}

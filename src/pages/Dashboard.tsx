@@ -6,10 +6,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Navbar } from "@/components/layout/Navbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Calendar, CalendarOff, Clock, Scissors, Plus, Loader2, Star, Pencil, User, Settings, MessageSquare, FileText, Palmtree, KeyRound } from "lucide-react";
+import { BarChart3, Calendar, CalendarOff, Clock, Scissors, Plus, Loader2, Star, Pencil, User, Settings, MessageSquare, FileText, Palmtree, KeyRound, Phone, MessageCircle } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { format, isFuture, isToday, parseISO } from "date-fns";
+import { format, isToday, parseISO } from "date-fns";
 import { ro as roLocale } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { AdminBookAppointment } from "@/components/admin/AdminBookAppointment";
@@ -38,7 +38,29 @@ interface Appointment {
   } | null;
   profiles?: {
     full_name: string;
+    phone?: string | null;
   };
+}
+
+function buildTelHref(phone: string): string | null {
+  const cleaned = phone.trim().replace(/[^\d+]/g, "");
+  if (!cleaned || cleaned.replace(/\D/g, "").length < 4) return null;
+  return `tel:${cleaned}`;
+}
+
+function buildWhatsAppHref(phone: string): string | null {
+  const trimmed = phone.trim();
+  const hasPlus = trimmed.startsWith("+");
+  let digits = trimmed.replace(/\D/g, "");
+  if (!digits || digits.length < 7) return null;
+  if (!hasPlus) {
+    if (digits.startsWith("00")) {
+      digits = digits.slice(2);
+    } else if (digits.length === 10 && digits.startsWith("0")) {
+      digits = `40${digits.slice(1)}`;
+    }
+  }
+  return `https://wa.me/${digits}`;
 }
 
 export default function Dashboard() {
@@ -51,6 +73,14 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const [bookDialogOpen, setBookDialogOpen] = useState(false);
   const [reviewTarget, setReviewTarget] = useState<ReviewTargetAppointment | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (isPasswordRecovery) {
@@ -102,21 +132,34 @@ export default function Dashboard() {
 
       if ((isAdmin || isSpecialist) && data.length > 0) {
         const userIds = [...new Set(data.map(a => a.user_id).filter(Boolean))] as string[];
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, full_name")
-          .in("id", userIds);
+        let profileMap = new Map<string, { full_name: string; phone: string | null }>();
+        if (userIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, full_name, phone")
+            .in("id", userIds);
 
-        const profileMap = new Map(profiles?.map(p => [p.id, p.full_name]) || []);
-        return data.map(a => ({
-          ...a,
-          profiles: { full_name: (a.user_id ? profileMap.get(a.user_id) : null) || a.guest_name || "Unknown" },
-        })) as unknown as Appointment[];
+          profileMap = new Map(
+            profiles?.map(p => [p.id, { full_name: p.full_name, phone: p.phone || null }]) || []
+          );
+        }
+        return data.map(a => {
+          const matchedProfile = a.user_id ? profileMap.get(a.user_id) : undefined;
+          return {
+            ...a,
+            profiles: {
+              full_name: matchedProfile?.full_name || a.guest_name || "Unknown",
+              phone: matchedProfile?.phone || a.guest_phone || null,
+            },
+          };
+        }) as unknown as Appointment[];
       }
 
       return data as unknown as Appointment[];
     },
     enabled: !!user,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const { data: myReviewsData } = useMyReviews();
@@ -128,8 +171,11 @@ export default function Dashboard() {
     return map;
   }, [myReviewsData?.reviews]);
 
+  const currentNow = Math.max(nowTick, Date.now());
   const upcomingAppointments = appointments.filter(
-    (apt) => isFuture(parseISO(apt.start_time)) && apt.status === "confirmed"
+    (apt) =>
+      parseISO(apt.start_time).getTime() > currentNow &&
+      apt.status === "confirmed"
   );
 
   const reviewableAppointments = useMemo(() => {
@@ -181,14 +227,21 @@ export default function Dashboard() {
   );
 
   const nextAppointment = upcomingAppointments[0];
+  const nextClientPhone =
+    nextAppointment?.profiles?.phone?.trim() ||
+    nextAppointment?.guest_phone?.trim() ||
+    null;
+  const nextTelHref = nextClientPhone ? buildTelHref(nextClientPhone) : null;
+  const nextWhatsAppHref = nextClientPhone ? buildWhatsAppHref(nextClientPhone) : null;
 
   const handleCancelAppointment = async (appointmentId: string) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("appointments")
       .update({ status: "cancelled" })
-      .eq("id", appointmentId);
+      .eq("id", appointmentId)
+      .select("id");
 
-    if (error) {
+    if (error || !data || data.length === 0) {
       toast({
         title: t("dashboard.error"),
         description: t("dashboard.cancelFailed"),
@@ -450,12 +503,27 @@ export default function Dashboard() {
                     </div>
                   </div>
                   
-                  <div className="space-y-2 mb-4">
+                  <div className="space-y-2 mb-5">
                     <p className="text-lg font-semibold">
                       {nextAppointment.services.name}
                     </p>
                     {(isAdmin || isSpecialist) && nextAppointment.profiles?.full_name && (
                       <p className="text-white/80 text-sm">{t("dashboard.client")}: {nextAppointment.profiles.full_name}</p>
+                    )}
+                    {(isAdmin || isSpecialist) && nextClientPhone && (
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <Phone className="h-3.5 w-3.5 text-purple-light shrink-0" />
+                        {nextTelHref ? (
+                          <a
+                            href={nextTelHref}
+                            className="text-purple-light hover:text-white underline underline-offset-4 transition-colors font-medium tabular-nums"
+                          >
+                            {nextClientPhone}
+                          </a>
+                        ) : (
+                          <span className="text-white/80 tabular-nums">{nextClientPhone}</span>
+                        )}
+                      </div>
                     )}
                     <div className="flex items-center gap-4 text-white/70 text-sm">
                       <span className="flex items-center gap-1">
@@ -466,13 +534,43 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <Button
-                    variant="hero-outline"
-                    size="sm"
-                    onClick={() => setConfirmCancelId(nextAppointment.id)}
-                  >
-                    {t("dashboard.cancelAppointment")}
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {(isAdmin || isSpecialist) && nextTelHref && (
+                      <Button
+                        asChild
+                        size="sm"
+                        className="bg-white text-navy hover:bg-white/90 font-medium"
+                      >
+                        <a href={nextTelHref}>
+                          <Phone className="h-4 w-4" />
+                          {ro ? "Sună" : "Call"}
+                        </a>
+                      </Button>
+                    )}
+                    {(isAdmin || isSpecialist) && nextWhatsAppHref && (
+                      <Button
+                        asChild
+                        size="sm"
+                        className="bg-[#25D366] hover:bg-[#1ebe5d] text-white font-medium border-0"
+                      >
+                        <a
+                          href={nextWhatsAppHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <MessageCircle className="h-4 w-4" />
+                          WhatsApp
+                        </a>
+                      </Button>
+                    )}
+                    <Button
+                      variant="hero-outline"
+                      size="sm"
+                      onClick={() => setConfirmCancelId(nextAppointment.id)}
+                    >
+                      {t("dashboard.cancelAppointment")}
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center py-12">

@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/hooks/useLanguage";
 import { Navbar } from "@/components/layout/Navbar";
@@ -41,6 +41,11 @@ interface WorkHour {
 export default function BookingPage() {
   const { user, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialSpecialistId = searchParams.get("specialistId");
+  const initialServiceId = searchParams.get("serviceId");
+  const appliedSpecialistRef = useRef(false);
+  const appliedServiceRef = useRef(false);
   const { toast } = useToast();
   const { t } = useLanguage();
   const dateLocale = ro;
@@ -101,6 +106,30 @@ export default function BookingPage() {
     },
     enabled: !!selectedSpecialist,
   });
+
+  // Pre-select specialist/service when navigated from a specialist's service card
+  useEffect(() => {
+    if (!initialSpecialistId || appliedSpecialistRef.current || specialists.length === 0) return;
+    const match = specialists.find((s) => s.id === initialSpecialistId);
+    if (match) {
+      appliedSpecialistRef.current = true;
+      setSelectedSpecialist(match);
+      if (!initialServiceId) {
+        setStep(2);
+      }
+    }
+  }, [initialSpecialistId, initialServiceId, specialists]);
+
+  useEffect(() => {
+    if (!initialServiceId || appliedServiceRef.current || !selectedSpecialist || services.length === 0) return;
+    if (initialSpecialistId && selectedSpecialist.id !== initialSpecialistId) return;
+    const match = services.find((srv) => srv.id === initialServiceId);
+    if (match) {
+      appliedServiceRef.current = true;
+      setSelectedService(match);
+      setStep(3);
+    }
+  }, [initialSpecialistId, initialServiceId, selectedSpecialist, services]);
 
   // Fetch specialist-specific work hours
   const { data: specialistWorkHours = [] } = useQuery({

@@ -1,15 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, ChangeEvent } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Loader2, Save, Plus, Trash2 } from "lucide-react";
+import { Loader2, Save, Plus, Trash2, ImagePlus, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useSalonSettings, useUpdateSalonSettings, SalonSettings } from "@/hooks/useSalonSettings";
 import { useLanguage } from "@/hooks/useLanguage";
 import { Separator } from "@/components/ui/separator";
 import { SalonGalleryManager } from "./SalonGalleryManager";
+import { compressLogoFile } from "@/lib/salon-gallery";
+import moodLogoSrc from "@/assets/mood_logo.png";
 
 export function SalonSettingsManager() {
   const { data: settings, isLoading } = useSalonSettings();
@@ -18,12 +20,69 @@ export function SalonSettingsManager() {
   const { t } = useLanguage();
 
   const [form, setForm] = useState<Partial<SalonSettings>>({});
+  const [isProcessingLogo, setIsProcessingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (settings) {
       setForm(settings);
     }
   }, [settings]);
+
+  const handleLogoFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: t("dashboard.error"),
+        description: "Te rugăm să selectezi un fișier imagine (PNG, JPG, WebP, SVG).",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsProcessingLogo(true);
+    try {
+      const dataUrl = await compressLogoFile(file);
+      setForm((prev) => ({ ...prev, logo_url: dataUrl }));
+      await updateMutation.mutateAsync({ logo_url: dataUrl });
+      toast({
+        title: t("settingsManager.logoSaved"),
+        description: t("settingsManager.savedDesc"),
+      });
+    } catch (err) {
+      console.error("Error updating logo:", err);
+      toast({
+        title: t("dashboard.error"),
+        description: err instanceof Error ? err.message : t("settingsManager.saveFailed"),
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
+  const handleResetLogo = async () => {
+    setIsProcessingLogo(true);
+    try {
+      setForm((prev) => ({ ...prev, logo_url: null }));
+      await updateMutation.mutateAsync({ logo_url: null });
+      toast({
+        title: t("settingsManager.logoSaved"),
+        description: t("settingsManager.savedDesc"),
+      });
+    } catch (err) {
+      console.error("Error resetting logo:", err);
+      toast({
+        title: t("dashboard.error"),
+        description: err instanceof Error ? err.message : t("settingsManager.saveFailed"),
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessingLogo(false);
+    }
+  };
 
   const handleSave = async () => {
     try {
@@ -137,6 +196,64 @@ export function SalonSettingsManager() {
             <Label>{t("settingsManager.salonName")}</Label>
             <Input value={form.salon_name || ""} onChange={(e) => setForm({ ...form, salon_name: e.target.value })} />
           </div>
+
+          <Separator />
+
+          <div className="space-y-3">
+            <Label>{t("settingsManager.logoIcon")}</Label>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="inline-flex items-center gap-2.5 rounded-lg bg-navy px-3.5 py-2.5 border border-white/10">
+                <img
+                  src={form.logo_url || moodLogoSrc}
+                  alt="Logo preview"
+                  className="h-10 w-10 rounded-lg object-cover shrink-0"
+                />
+                <span className="font-bold text-lg text-white tracking-tight">
+                  {form.salon_name || "MOOD MEN SALON"}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleLogoFileChange}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isProcessingLogo || updateMutation.isPending}
+                  onClick={() => logoInputRef.current?.click()}
+                >
+                  {isProcessingLogo ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ImagePlus className="h-4 w-4" />
+                  )}
+                  {t("settingsManager.uploadLogo")}
+                </Button>
+
+                {form.logo_url && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isProcessingLogo || updateMutation.isPending}
+                    onClick={handleResetLogo}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    {t("settingsManager.resetLogo")}
+                  </Button>
+                )}
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("settingsManager.logoHint")}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -240,6 +357,15 @@ export function SalonSettingsManager() {
           <CardTitle>{t("settingsManager.footerContact")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div>
+            <Label>{t("settingsManager.footerDescription")}</Label>
+            <Textarea
+              value={form.footer_description ?? ""}
+              onChange={(e) => setForm({ ...form, footer_description: e.target.value })}
+              placeholder="Premium grooming services for the modern gentleman."
+              rows={2}
+            />
+          </div>
           <div>
             <Label>{t("settingsManager.address")}</Label>
             <Input value={form.footer_address || ""} onChange={(e) => setForm({ ...form, footer_address: e.target.value })} />

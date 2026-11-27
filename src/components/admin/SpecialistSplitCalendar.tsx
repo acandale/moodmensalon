@@ -87,6 +87,7 @@ interface SpecialistSplitCalendarProps {
   selectedSpecialistId: string | null;
   onSelectSpecialistFilter?: (specialistId: string | null) => void;
   isAdmin: boolean;
+  currentSpecialistId?: string | null;
   appointments: SplitCalendarAppointment[];
   weekAppointmentDates?: Date[];
   specialistWorkHours: SplitCalendarWorkHour[];
@@ -207,6 +208,7 @@ export function SpecialistSplitCalendar({
   selectedSpecialistId,
   onSelectSpecialistFilter,
   isAdmin,
+  currentSpecialistId,
   appointments,
   weekAppointmentDates = [],
   specialistWorkHours,
@@ -217,6 +219,8 @@ export function SpecialistSplitCalendar({
   onQuickBook,
   onOpenBlockedTimes,
 }: SpecialistSplitCalendarProps) {
+  const canManageSpecialist = (specId: string) =>
+    isAdmin || (!!currentSpecialistId && specId === currentSpecialistId);
   const weekStart = useMemo(
     () => startOfWeek(currentDate, { weekStartsOn: 1 }),
     [currentDate]
@@ -524,7 +528,7 @@ export function SpecialistSplitCalendar({
                         </div>
                       </div>
 
-                      {!col.isUnassigned && (
+                      {!col.isUnassigned && (canManageSpecialist(col.specialist.id) || !!onSelectSpecialistFilter) && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -537,18 +541,20 @@ export function SpecialistSplitCalendar({
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() =>
-                                onQuickBook({
-                                  specialistId: col.specialist.id,
-                                  date: currentDate,
-                                })
-                              }
-                            >
-                              <Plus className="h-4 w-4 mr-2" />
-                              Programează la {col.specialist.name}
-                            </DropdownMenuItem>
-                            {isAdmin && onSelectSpecialistFilter && (
+                            {canManageSpecialist(col.specialist.id) && (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  onQuickBook({
+                                    specialistId: col.specialist.id,
+                                    date: currentDate,
+                                  })
+                                }
+                              >
+                                <Plus className="h-4 w-4 mr-2" />
+                                Programează la {col.specialist.name}
+                              </DropdownMenuItem>
+                            )}
+                            {onSelectSpecialistFilter && (
                               <DropdownMenuItem
                                 onClick={() =>
                                   onSelectSpecialistFilter(isFocused ? null : col.specialist.id)
@@ -560,7 +566,7 @@ export function SpecialistSplitCalendar({
                                   : `Filtrează doar ${col.specialist.name}`}
                               </DropdownMenuItem>
                             )}
-                            {onOpenBlockedTimes && (
+                            {canManageSpecialist(col.specialist.id) && onOpenBlockedTimes && (
                               <DropdownMenuItem
                                 onClick={() => onOpenBlockedTimes(col.specialist.id)}
                               >
@@ -619,12 +625,15 @@ export function SpecialistSplitCalendar({
                         "0"
                       )}`;
 
+                      const canQuickBookSlot =
+                        isWithinWorkHours && !col.isUnassigned && canManageSpecialist(col.specialist.id);
+
                       return (
                         <div
                           key={timeStr}
                           style={{ height: SLOT_HEIGHT }}
                           onClick={() => {
-                            if (isWithinWorkHours && !col.isUnassigned) {
+                            if (canQuickBookSlot) {
                               onQuickBook({
                                 specialistId: col.specialist.id,
                                 date: currentDate,
@@ -633,7 +642,7 @@ export function SpecialistSplitCalendar({
                             }
                           }}
                           title={
-                            isWithinWorkHours && !col.isUnassigned
+                            canQuickBookSlot
                               ? `Adaugă programare pentru ${col.specialist.name} la ${timeStr}`
                               : undefined
                           }
@@ -643,10 +652,10 @@ export function SpecialistSplitCalendar({
                             isHalfHourLine && "border-t border-border/35",
                             !isWithinWorkHours
                               ? "bg-muted/45"
-                              : !col.isUnassigned && "hover:bg-purple/5 cursor-pointer"
+                              : canQuickBookSlot && "hover:bg-purple/5 cursor-pointer"
                           )}
                         >
-                          {isWithinWorkHours && !col.isUnassigned && (
+                          {canQuickBookSlot && (
                             <span className="hidden group-hover:inline-block absolute right-1.5 top-0.5 text-[10px] font-medium text-purple/70 tabular-nums pointer-events-none">
                               + {timeStr}
                             </span>
@@ -776,7 +785,8 @@ export function SpecialistSplitCalendar({
         aria-label="Programare nouă"
         onClick={() =>
           onQuickBook({
-            specialistId: selectedSpecialistId || specialists[0]?.id,
+            specialistId:
+              (!isAdmin && currentSpecialistId) || selectedSpecialistId || specialists[0]?.id,
             date: currentDate,
           })
         }

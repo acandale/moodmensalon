@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -29,6 +29,24 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const clearStoredAuthTokens = () => {
+  if (typeof window === "undefined") return;
+  try {
+    for (const store of [window.localStorage, window.sessionStorage]) {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < store.length; i++) {
+        const key = store.key(i);
+        if (key && /^sb-.*-auth-token/.test(key)) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((key) => store.removeItem(key));
+    }
+  } catch {
+    // Ignore storage access errors in restricted frames
+  }
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
@@ -42,15 +60,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     typeof window !== "undefined" &&
     (window.location.hash.includes("type=recovery") || window.location.search.includes("type=recovery"))
   );
+  const authEpochRef = useRef(0);
+  const signingOutRef = useRef(false);
 
   const clearPasswordRecovery = () => setIsPasswordRecovery(false);
 
   const fetchProfile = async (userId: string) => {
+    const epoch = authEpochRef.current;
+
     const { data: profileData } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", userId)
       .single();
+
+    if (authEpochRef.current !== epoch) return;
 
     if (profileData) {
       setProfile(profileData);
@@ -62,6 +86,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq("user_id", userId)
       .single();
 
+    if (authEpochRef.current !== epoch) return;
+
     setIsAdmin(roleData?.role === "admin");
     setIsSpecialist(roleData?.role === "specialist");
 
@@ -72,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .select("id")
         .eq("user_id", userId)
         .single();
+      if (authEpochRef.current !== epoch) return;
       setSpecialistId(specData?.id || null);
     } else {
       setSpecialistId(null);
@@ -90,6 +117,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
+      if (event === "SIGNED_IN" || event === "PASSWORD_RECOVERY") {
+        signingOutRef.current = false;
+        authEpochRef.current += 1;
+      } else if (signingOutRef.current && event !== "SIGNED_OUT") {
+        return;
+      } else if (event === "INITIAL_SESSION") {
+        authEpochRef.current += 1;
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
 
@@ -99,12 +135,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           navigate("/auth?mode=reset", { replace: true });
         }
       } else if (event === "SIGNED_OUT") {
+        authEpochRef.current += 1;
         setIsPasswordRecovery(false);
       }
 
       if (session?.user) {
         setTimeout(() => {
-          if (mounted) {
+          if (mounted && !signingOutRef.current) {
             fetchProfile(session.user.id);
           }
         }, 0);
@@ -115,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSpecialistId(null);
       }
 
-      if (initialResolved || event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+      if (initialResolved || event === "PASSWORD_RECOVERY" || event === "SIGNED_IN" || event === "SIGNED_OUT") {
         setIsLoading(false);
       }
     });
@@ -123,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth
       .getSession()
       .then(({ data: { session } }) => {
-        if (!mounted) return;
+        if (!mounted || signingOutRef.current) return;
         setSession(session);
         setUser(session?.user ?? null);
 
@@ -163,6 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signIn = async (email: string, password: string) => {
+    signingOutRef.current = false;
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -172,11 +210,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error("Sign out error:", error);
-    }
+    signingOutRef.current = true;
+    authEpochRef.current += 1;
     setUser(null);
     setSession(null);
     setProfile(null);
@@ -184,6 +219,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsSpecialist(false);
     setSpecialistId(null);
     setIsPasswordRecovery(false);
+
+    try {
+      await Promise.race([
+        supabase.auth.signOut({ scope: "global" }),
+        new Promise<void>((resolve) => setTimeout(resolve, 1200)),
+      ]);
+    } catch (error) {
+      console.error("Global sign out error:", error);
+    }
+
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch (error) {
+      console.error("Local sign out error:", error);
+    }
+
+    clearStoredAuthTokens();
+    signingOutRef.current = false;
   };
 
   return (

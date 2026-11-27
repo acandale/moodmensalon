@@ -127,10 +127,10 @@ export default function AdminPage() {
     }
   }, [user, isAdmin, isSpecialist, authLoading, navigate]);
 
-  // If specialist, auto-set filter to own specialist
+  // If specialist, default blocked-times/vacations tab to own specialist,
+  // while keeping calendar split view open across all active specialists
   useEffect(() => {
     if (isSpecialist && specialistId) {
-      setFilterSpecialistId(specialistId);
       setSelectedBlockSpecialistId(specialistId);
     }
   }, [isSpecialist, specialistId]);
@@ -311,17 +311,30 @@ export default function AdminPage() {
   // Cancel appointment mutation
   const cancelMutation = useMutation({
     mutationFn: async (appointmentId: string) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("appointments")
         .update({ status: "cancelled" })
-        .eq("id", appointmentId);
+        .eq("id", appointmentId)
+        .select("id");
 
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Nu ai permisiunea să anulezi această programare.");
+      }
     },
     onSuccess: () => {
       toast({ title: "Programare anulată" });
       setSelectedAppointment(null);
       queryClient.invalidateQueries({ queryKey: ["admin-appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments-for-date"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Anularea a eșuat",
+        description: error.message || "Nu s-a putut anula programarea.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -422,8 +435,9 @@ export default function AdminPage() {
         onDateChange={setCurrentDate}
         specialists={specialists}
         selectedSpecialistId={filterSpecialistId}
-        onSelectSpecialistFilter={isAdmin ? setFilterSpecialistId : undefined}
+        onSelectSpecialistFilter={setFilterSpecialistId}
         isAdmin={isAdmin}
+        currentSpecialistId={specialistId}
         appointments={appointments}
         weekAppointmentDates={weekAppointmentDates}
         specialistWorkHours={specialistWorkHours}
@@ -516,15 +530,6 @@ export default function AdminPage() {
                   <MessageSquare className="h-4 w-4" />
                   {language === "ro" ? "Recenzii" : "Reviews"}
                 </TabsTrigger>
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="flex items-center gap-2 ml-2"
-                  onClick={() => setBookDialogOpen(true)}
-                >
-                  <Calendar className="h-4 w-4" />
-                  Adaugă programare
-                </Button>
               </>
             )}
             <Button
@@ -545,12 +550,17 @@ export default function AdminPage() {
               <CardContent className="py-4">
                 <div className="flex items-center justify-between flex-wrap gap-4">
                   <div className="flex items-center gap-2">
-                    {isAdmin && (
+                    {(isAdmin || isSpecialist) && (
                       <>
                         <Button
                           variant="default"
                           size="sm"
-                          onClick={() => openQuickBook({ date: currentDate })}
+                          onClick={() =>
+                            openQuickBook({
+                              date: currentDate,
+                              specialistId: !isAdmin && specialistId ? specialistId : undefined,
+                            })
+                          }
                         >
                           <Calendar className="h-4 w-4" />
                           {t("admin.newAppointment")}
@@ -827,23 +837,24 @@ export default function AdminPage() {
                       : selectedAppointment.status}
                   </span>
 
-                  {selectedAppointment.status === "confirmed" && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => cancelMutation.mutate(selectedAppointment.id)}
-                      disabled={cancelMutation.isPending}
-                    >
-                      {cancelMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <>
-                          <X className="h-4 w-4" />
-                          Anulează
-                        </>
-                      )}
-                    </Button>
-                  )}
+                  {selectedAppointment.status === "confirmed" &&
+                    (isAdmin || selectedAppointment.specialist_id === specialistId) && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => cancelMutation.mutate(selectedAppointment.id)}
+                        disabled={cancelMutation.isPending}
+                      >
+                        {cancelMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <X className="h-4 w-4" />
+                            Anulează
+                          </>
+                        )}
+                      </Button>
+                    )}
                 </div>
               </div>
             </DialogContent>

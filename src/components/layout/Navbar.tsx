@@ -7,6 +7,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useSalonSettings } from "@/hooks/useSalonSettings";
 import { Scissors, Menu, X, User, Calendar, LogOut, Settings, Download, Globe, Sun, Moon } from "lucide-react";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,16 +23,23 @@ export function Navbar() {
   const { theme, toggleTheme } = useTheme();
   const { data: salonSettings } = useSalonSettings();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   const handleSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
     try {
       setMobileMenuOpen(false);
       await signOut();
+      queryClient.clear();
       navigate("/", { replace: true });
     } catch (error) {
       console.error("Eroare la logout:", error);
-      navigate("/");
+      navigate("/", { replace: true });
+    } finally {
+      setIsSigningOut(false);
     }
   };
 
@@ -41,7 +49,11 @@ export function Navbar() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 group">
-<img src={moodLogoSrc} alt="Logo" className="h-10 w-10 rounded-lg object-cover" />
+            <img
+              src={salonSettings?.logo_url || moodLogoSrc}
+              alt="Logo"
+              className="h-10 w-10 rounded-lg object-cover"
+            />
             <span className="font-bold text-xl text-white tracking-tight">
               {salonSettings?.salon_name || "BarberPro"}
             </span>
@@ -120,7 +132,13 @@ export function Navbar() {
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator className="bg-white/10" />
-                  <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer hover:bg-red-500/20 text-red-400 gap-2">
+                  <DropdownMenuItem
+                    disabled={isSigningOut}
+                    onSelect={() => {
+                      void handleSignOut();
+                    }}
+                    className="cursor-pointer hover:bg-red-500/20 text-red-400 gap-2"
+                  >
                     <LogOut className="h-4 w-4" /> {t("nav.signOut")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -155,7 +173,7 @@ export function Navbar() {
               <Link to="/install" className="text-lg font-semibold text-white/90 flex items-center gap-2" onClick={() => setMobileMenuOpen(false)}>
                 <Download className="h-5 w-5" /> {t("nav.install")}
               </Link>
-              <DropdownMenuSeparator className="bg-white/10 my-2" />
+              <div className="h-px bg-white/10 my-2" />
               {!user ? (
                 <button className="text-lg font-semibold text-purple-light text-left flex items-center gap-2" onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}>
                   <User className="h-5 w-5" /> {t("nav.signIn")}
@@ -180,7 +198,14 @@ export function Navbar() {
                       <Settings className="h-5 w-5 inline mr-2" /> {isAdmin ? t("nav.adminPanel") : t("nav.specialistPanel")}
                     </Link>
                   )}
-                  <button onClick={handleSignOut} className="text-lg font-semibold text-red-400 text-left flex items-center gap-2 mt-2">
+                  <button
+                    type="button"
+                    disabled={isSigningOut}
+                    onClick={() => {
+                      void handleSignOut();
+                    }}
+                    className="text-lg font-semibold text-red-400 text-left flex items-center gap-2 mt-2"
+                  >
                     <LogOut className="h-5 w-5" /> {t("nav.signOut")}
                   </button>
                 </>

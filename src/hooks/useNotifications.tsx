@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/hooks/useLanguage";
 
 export type NotificationType =
+  | "reminder_1h"
   | "reminder_24h"
   | "reminder_3h"
   | "booking_confirmed"
@@ -70,7 +71,7 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   appointment_id uuid REFERENCES public.appointments(id) ON DELETE CASCADE,
-  type text NOT NULL CHECK (type IN ('reminder_24h', 'reminder_3h', 'booking_confirmed', 'appointment_cancelled', 'general')),
+  type text NOT NULL CHECK (type IN ('reminder_1h', 'reminder_24h', 'reminder_3h', 'booking_confirmed', 'appointment_cancelled', 'general')),
   title text NOT NULL,
   message text NOT NULL,
   scheduled_for timestamptz NOT NULL DEFAULT now(),
@@ -241,6 +242,23 @@ export function useNotifications() {
                 created_at: apt.created_at || new Date().toISOString(),
               });
             }
+
+            const reminder1hDate = addHours(start, -1);
+            if (
+              start.getTime() > nowMs &&
+              (reminder1hDate.getTime() > nowMs || reminder1hDate.getTime() > createdAtMs)
+            ) {
+              list.push({
+                appointment_id: apt.id,
+                type: "reminder_1h",
+                title: isRo ? "Reminder: Programare în 1 oră" : "Reminder: Appointment in 1h",
+                message: isRo
+                  ? `Programarea ta pentru ${serviceName}${withSpec} începe într-o oră (${formattedDate}).`
+                  : `Your appointment for ${serviceName}${withSpec} starts in 1 hour (${formattedDate}).`,
+                scheduled_for: reminder1hDate.toISOString(),
+                created_at: apt.created_at || new Date().toISOString(),
+              });
+            }
           }
         }
         return list;
@@ -289,7 +307,7 @@ export function useNotifications() {
       );
 
       if (missingToInsert.length > 0) {
-        const { data: inserted } = await supabase
+        const { data: inserted, error: upsertError } = await supabase
           .from("notifications")
           .upsert(
             missingToInsert.map((m) => ({
@@ -304,9 +322,59 @@ export function useNotifications() {
           )
           .select("*");
 
-        if (inserted && inserted.length > 0) {
+        if (!upsertError && inserted && inserted.length > 0) {
           return {
             items: [...(inserted as AppNotification[]), ...existingRows],
+            tableMissing: false,
+          };
+        }
+
+        if (upsertError) {
+          // If DB CHECK constraint doesn't yet include reminder_1h, insert the rest & keep reminder_1h locally
+          const non1h = missingToInsert.filter((m) => m.type !== "reminder_1h");
+          const only1h = missingToInsert.filter((m) => m.type === "reminder_1h");
+
+          let insertedFallback: AppNotification[] = [];
+          if (non1h.length > 0) {
+            const { data: retryData } = await supabase
+              .from("notifications")
+              .upsert(
+                non1h.map((m) => ({
+                  user_id: user.id,
+                  appointment_id: m.appointment_id,
+                  type: m.type,
+                  title: m.title,
+                  message: m.message,
+                  scheduled_for: m.scheduled_for,
+                })),
+                { onConflict: "appointment_id,type", ignoreDuplicates: true }
+              )
+              .select("*");
+            insertedFallback = (retryData as AppNotification[]) || [];
+          }
+
+          const readIds = getLocalReadIds(user.id);
+          const local1hItems: AppNotification[] = only1h.map((d) => {
+            const id = `local-${d.appointment_id}-${d.type}`;
+            return {
+              id,
+              user_id: user.id,
+              appointment_id: d.appointment_id,
+              type: d.type,
+              title: d.title,
+              message: d.message,
+              scheduled_for: d.scheduled_for,
+              sent_at: null,
+              push_sent: false,
+              is_read: readIds.has(id),
+              read_at: null,
+              created_at: d.created_at,
+              isFallback: true,
+            };
+          });
+
+          return {
+            items: [...local1hItems, ...insertedFallback, ...existingRows],
             tableMissing: false,
           };
         }
@@ -379,6 +447,19 @@ export function useNotifications() {
         return;
       }
 
+      const fallbackItems = items.filter(
+        (item) =>
+          item.isFallback && new Date(item.scheduled_for).getTime() <= Date.now()
+      );
+      if (fallbackItems.length > 0) {
+        const set = getLocalReadIds(user.id);
+        for (const item of fallbackItems) {
+          set.add(item.id);
+        }
+        saveLocalReadIds(user.id, set);
+        setLocalReadVersion((v) => v + 1);
+      }
+
       const { error } = await supabase
         .from("notifications")
         .update({ is_read: true, read_at: new Date().toISOString() })
@@ -409,7 +490,9 @@ export function useNotifications() {
     const scheduled = normalized
       .filter(
         (n) =>
-          (n.type === "reminder_24h" || n.type === "reminder_3h") &&
+          (n.type === "reminder_1h" ||
+            n.type === "reminder_24h" ||
+            n.type === "reminder_3h") &&
           new Date(n.scheduled_for).getTime() > nowMs
       )
       .sort((a, b) => new Date(a.scheduled_for).getTime() - new Date(b.scheduled_for).getTime());

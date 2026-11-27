@@ -31,8 +31,8 @@ export function PushNotificationBanner({ compact = false }: PushNotificationBann
       toast({
         title: isRo ? "Notificări activate" : "Notifications enabled",
         description: isRo
-          ? "Vei primi notificări cu 24h și 3h înainte de fiecare programare."
-          : "You will receive notifications 24h and 3h before each appointment.",
+          ? "Vei primi notificări cu 1 oră înainte de fiecare programare (plus 3h și 24h)."
+          : "You will receive notifications 1 hour before each appointment (plus 3h and 24h).",
       });
     } else if (res.errorMessage) {
       toast({
@@ -41,6 +41,21 @@ export function PushNotificationBanner({ compact = false }: PushNotificationBann
         variant: "destructive",
       });
     }
+  };
+
+  const handleTest = async () => {
+    const res = await sendTestPush();
+    toast({
+      title: isRo ? "Notificare test trimisă" : "Test notification sent",
+      description:
+        res.mode === "server"
+          ? isRo
+            ? "Trimisă prin serverul Web Push (VAPID)."
+            : "Sent via Web Push (VAPID) server."
+          : isRo
+          ? "Afișată local pe dispozitiv."
+          : "Displayed locally on this device.",
+    });
   };
 
   if (compact) {
@@ -58,8 +73,8 @@ export function PushNotificationBanner({ compact = false }: PushNotificationBann
             <div>
               <p className="text-sm font-semibold text-foreground">
                 {isRo
-                  ? "Activează notificările pe telefon (24h & 3h înainte)"
-                  : "Enable phone push reminders (24h & 3h before)"}
+                  ? "Activează notificările pe telefon (cu 1h, 3h și 24h înainte)"
+                  : "Enable phone push reminders (1h, 3h & 24h before)"}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {needsIosInstall
@@ -96,8 +111,8 @@ export function PushNotificationBanner({ compact = false }: PushNotificationBann
         </CardTitle>
         <CardDescription>
           {isRo
-            ? "Primește remindere automate cu 24 de ore și 3 ore înainte de programări."
-            : "Receive automatic reminders 24 hours and 3 hours before your appointments."}
+            ? "Primește remindere automate cu 1 oră înainte de programare (plus 3h și 24h)."
+            : "Receive automatic reminders 1 hour before your appointment (plus 3h and 24h)."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -126,7 +141,7 @@ export function PushNotificationBanner({ compact = false }: PushNotificationBann
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void sendTestPush()}
+                onClick={() => void handleTest()}
               >
                 {isRo ? "Trimite test" : "Send test"}
               </Button>

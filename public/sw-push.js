@@ -21,6 +21,7 @@ self.addEventListener("push", (event) => {
       icon: "/pwa-192x192.png",
       badge: "/pwa-192x192.png",
       tag: payload.tag || "appointment-reminder",
+      renotify: true,
       data: { url: payload.url || "/dashboard" },
       vibrate: [200, 100, 200],
     })
